@@ -1,0 +1,17 @@
+# Normalisation des fins de ligne : LF dans le repo, adaptation locale au checkout
+* text=auto
+
+# Scripts shell : DOIVENT rester en LF (sinon cassés sur Mac/Linux/CI)
+*.sh    text eol=lf
+gradlew text eol=lf
+
+# Scripts Windows : CRLF
+*.bat       text eol=crlf
+gradlew.bat text eol=crlf
+
+# Fichiers binaires : jamais de conversion
+*.jar   binary
+*.png   binary
+*.jpg   binary
+*.ico   binary
+*.db    binary

@@ -1,0 +1,42 @@
+# ===== Gradle =====
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# ===== Kotlin / JVM build output =====
+*.class
+out/
+bin/
+
+# ===== JVM crash / debug dumps =====
+hs_err_pid*.log
+replay_pid*.log
+*.hprof
+core.*
+
+# ===== Fichier parasite Windows =====
+nul
+
+# ===== IDE =====
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+*.swp
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== Claude Code (local settings & secrets) =====
+.claude/settings.local.json
+
+# ===== Secrets / config locale (Supabase, clés API) =====
+# À NE JAMAIS committer : URL projet, anon key, service key, clés IA
+.env
+.env.*
+local.properties
+secrets.properties
+*.local.properties
