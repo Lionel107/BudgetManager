@@ -45,75 +45,10 @@ fun main() {
         modules(appModule)
     }
 
-    // 2. Force Database initialization FIRST (triggers DatabaseManager.init())
-    val dbManager = getKoin().get<DatabaseManager>()
-    // DatabaseManager.init() is called in Koin's single{} block, so DB is now ready
-
-    // 3. Create default categories if first run
-    val categoryRepo = getKoin().get<CategoryRepository>()
-    runBlocking {
-        categoryRepo.createDefaultCategories()
-    }
-
-    // 3b. Daily backup (runs once per day at most)
-    runCatching { com.budgetmanager.util.BackupService().runDailyBackup() }
-
-    // 4. Process any pending recurring transactions
-    val recurringRepo = getKoin().get<RecurringTransactionRepository>()
-    runBlocking {
-        recurringRepo.processRecurringTransactions()
-    }
-
-    // 4b. Background scheduler — re-process every 30 minutes while app is running
-    //     handles: app left open across midnight / for several days
-    val backgroundScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    backgroundScope.launch {
-        while (true) {
-            delay(30 * 60 * 1000L) // 30 minutes
-            try {
-                recurringRepo.processRecurringTransactions()
-            } catch (_: Exception) { /* swallow — retry next tick */ }
-        }
-    }
-
-    // 4c. Populate notifications from advice engine on startup + periodically
-    backgroundScope.launch {
-        delay(2000) // wait for initial data load
-        while (true) {
-            try {
-                val accountRepo = getKoin().get<com.budgetmanager.data.repository.AccountRepository>()
-                val transactionRepo = getKoin().get<com.budgetmanager.data.repository.TransactionRepository>()
-                val budgetRepo = getKoin().get<com.budgetmanager.data.repository.BudgetRepository>()
-                val appPrefs = getKoin().get<com.budgetmanager.data.preferences.AppPreferences>()
-
-                val accounts = accountRepo.getAllAccounts().first()
-                val transactions = transactionRepo.getAllTransactions().first()
-                val now = java.time.YearMonth.now()
-                val budgets = budgetRepo.getBudgetsWithSpending(now.atDay(1), now.atEndOfMonth()).first()
-                    .map { s ->
-                        com.budgetmanager.domain.model.BudgetWithStatus(
-                            budget = com.budgetmanager.domain.model.Budget(
-                                id = s.budgetId,
-                                categoryId = s.categoryId,
-                                categoryName = s.categoryName,
-                                categoryColor = s.categoryColor,
-                                periodType = com.budgetmanager.domain.model.BudgetPeriodType.MONTHLY,
-                                limit = s.budgetLimit
-                            ),
-                            spent = s.spent,
-                            remaining = s.remaining,
-                            percentage = s.percentage,
-                            state = s.state
-                        )
-                    }
-                val advices = com.budgetmanager.util.AdviceEngine().analyze(
-                    accounts, transactions, budgets, appPrefs.savingsGoal
-                )
-                advices.forEach { com.budgetmanager.presentation.components.NotificationCenter.addFromAdvice(it) }
-            } catch (_: Exception) { /* skip */ }
-            delay(60 * 60 * 1000L) // refresh hourly
-        }
-    }
+    // 2. Note : les repositories utilisent désormais Supabase. Les opérations qui
+    //    dépendent des données (catégories par défaut, récurrences, conseils)
+    //    nécessitent une session authentifiée → elles sont lancées APRÈS le login
+    //    (voir PostLoginInit dans le contenu authentifié plus bas).
 
     // 5. Load theme + density preferences
     val appPrefs = getKoin().get<com.budgetmanager.data.preferences.AppPreferences>()
@@ -145,6 +80,7 @@ fun main() {
             BudgetManagerTheme {
                 val authRepo = remember { getKoin().get<com.budgetmanager.data.remote.AuthRepository>() }
                 com.budgetmanager.presentation.screens.auth.AuthGate(authRepo) {
+                    com.budgetmanager.presentation.screens.auth.PostLoginInit()
                     val navigationState = remember { NavigationState() }
                     AppLayout(navigationState)
                 }

@@ -28,6 +28,13 @@ data class AccountRef(
 )
 
 @Serializable
+data class TagNameRef(val name: String? = null)
+
+/** Ligne de jointure transaction_tags avec le tag embarqué (alias `tag:tags(name)`). */
+@Serializable
+data class TagLink(@SerialName("tag") val tag: TagNameRef? = null)
+
+@Serializable
 data class AccountDto(
     val id: Long? = null,
     @SerialName("user_id") val userId: String? = null,
@@ -74,7 +81,8 @@ data class TransactionDto(
     @SerialName("created_at") val createdAt: String? = null,
     // Embeds (jointures optionnelles)
     @SerialName("category") val category: CategoryRef? = null,
-    @SerialName("account") val account: AccountRef? = null
+    @SerialName("account") val account: AccountRef? = null,
+    @SerialName("tag_links") val tagLinks: List<TagLink>? = null
 )
 
 @Serializable
@@ -96,7 +104,8 @@ data class RecurringTransactionDto(
     val notes: String? = null,
     @SerialName("destination_account_id") val destinationAccountId: Long? = null,
     @SerialName("category") val category: CategoryRef? = null,
-    @SerialName("account") val account: AccountRef? = null
+    @SerialName("account") val account: AccountRef? = null,
+    @SerialName("destination") val destination: AccountRef? = null
 )
 
 @Serializable

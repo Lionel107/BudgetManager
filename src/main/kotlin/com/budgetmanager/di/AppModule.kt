@@ -25,9 +25,9 @@ val appModule = module {
     // Repositories (backend Supabase)
     single { AccountRepository(get()) }
     single { CategoryRepository(get()) }
-    single { TransactionRepository(get(), get()) }
-    single { BudgetRepository() }
-    single { RecurringTransactionRepository(get(), get()) }
+    single { TransactionRepository(get(), get(), get()) }
+    single { BudgetRepository(get()) }
+    single { RecurringTransactionRepository(get(), get(), get()) }
     single { com.budgetmanager.data.repository.TemplateRepository(get()) }
     single { com.budgetmanager.data.repository.TagRepository(get()) }
     single { com.budgetmanager.data.repository.SplitRepository(get()) }

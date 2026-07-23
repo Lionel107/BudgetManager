@@ -1,203 +1,167 @@
 package com.budgetmanager.data.repository
 
-import com.budgetmanager.data.database.Budgets
-import com.budgetmanager.data.database.Categories
-import com.budgetmanager.data.database.Transactions
-import com.budgetmanager.data.database.TransactionSplits
+import com.budgetmanager.data.remote.BigDecimalSerializer
+import com.budgetmanager.data.remote.DtoDates
+import com.budgetmanager.data.remote.SupabaseClientProvider
+import com.budgetmanager.data.remote.dto.BudgetDto
+import com.budgetmanager.data.remote.dto.TransactionDto
 import com.budgetmanager.domain.model.Budget
 import com.budgetmanager.domain.model.BudgetPeriodType
 import com.budgetmanager.domain.model.BudgetState
 import com.budgetmanager.domain.model.BudgetStatusData
 import com.budgetmanager.domain.model.TransactionType
-import kotlinx.coroutines.Dispatchers
+import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.postgrest.query.Columns
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.withContext
-import org.jetbrains.exposed.sql.*
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
-import org.jetbrains.exposed.sql.transactions.transaction
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.LocalDate
+import java.time.LocalDateTime
 
-class BudgetRepository {
+@Serializable
+private data class TxnMini(
+    val id: Long? = null,
+    val date: String? = null,
+    @SerialName("transaction_type") val transactionType: String? = null
+)
 
+@Serializable
+private data class SplitAggRow(
+    @SerialName("category_id") val categoryId: Long? = null,
+    @Serializable(with = BigDecimalSerializer::class) val amount: BigDecimal,
+    @SerialName("transaction") val transaction: TxnMini? = null
+)
+
+/** Repository Budgets — backend Supabase (Postgrest). */
+class BudgetRepository(private val provider: SupabaseClientProvider) {
+
+    private val db get() = provider.client
+    private val cols = Columns.raw("*, category:categories!inner(name,color)")
     private val _refreshTrigger = MutableStateFlow(0L)
 
     fun refresh() {
         _refreshTrigger.value = System.currentTimeMillis()
     }
 
-    fun getAllBudgets(): Flow<List<Budget>> {
-        return _refreshTrigger.map {
-            withContext(Dispatchers.IO) {
-                transaction {
-                    Budgets.join(Categories, JoinType.INNER, Budgets.categoryId, Categories.id)
-                        .selectAll()
-                        .map { it.toBudget() }
+    fun getAllBudgets(): Flow<List<Budget>> = _refreshTrigger.map {
+        db.from("budgets").select(cols).decodeList<BudgetDto>().map { it.toDomain() }
+    }
+
+    fun getBudgetsWithSpending(periodStart: LocalDate, periodEnd: LocalDate): Flow<List<BudgetStatusData>> =
+        _refreshTrigger.map {
+            val startDt = periodStart.atStartOfDay()
+            val endDt = periodEnd.atTime(23, 59, 59)
+
+            val budgets = db.from("budgets").select(cols).decodeList<BudgetDto>().map { it.toDomain() }
+
+            // Dépenses de la période (filtrées serveur)
+            val expenses = db.from("transactions").select {
+                filter {
+                    eq("transaction_type", TransactionType.EXPENSE.name)
+                    gte("date", DtoDates.formatDateTime(startDt))
+                    lte("date", DtoDates.formatDateTime(endDt))
                 }
+            }.decodeList<TransactionDto>()
+
+            // Ventilations + transaction parente (filtrage période/type côté client)
+            val splitRows = db.from("transaction_splits").select(
+                Columns.raw("category_id, amount, transaction:transactions(id,date,transaction_type)")
+            ).decodeList<SplitAggRow>().filter { row ->
+                val t = row.transaction ?: return@filter false
+                if (t.transactionType != TransactionType.EXPENSE.name) return@filter false
+                val d = DtoDates.parseDateTime(t.date) ?: return@filter false
+                !d.isBefore(startDt) && !d.isAfter(endDt)
+            }
+
+            val txnIdsWithSplits: Set<Long> = splitRows.mapNotNull { it.transaction?.id }.toSet()
+
+            budgets.map { budget ->
+                // 1) Dépenses "simples" : catégorie du budget, hors transactions ventilées
+                val plainSpent = expenses
+                    .filter { it.categoryId == budget.categoryId && (it.id !in txnIdsWithSplits) }
+                    .fold(BigDecimal.ZERO) { acc, t -> acc.add(t.amount) }
+
+                // 2) Dépenses issues des ventilations pointant vers la catégorie du budget
+                val splitSpent = splitRows
+                    .filter { it.categoryId == budget.categoryId }
+                    .fold(BigDecimal.ZERO) { acc, s -> acc.add(s.amount) }
+
+                val spent = plainSpent.add(splitSpent)
+                val percentage = if (budget.limit.compareTo(BigDecimal.ZERO) != 0) {
+                    spent.divide(budget.limit, 4, RoundingMode.HALF_UP).toFloat()
+                } else 0f
+                val remaining = budget.limit.subtract(spent).let {
+                    if (it < BigDecimal.ZERO) BigDecimal.ZERO else it
+                }
+                val state = BudgetState.fromPercentage(percentage, budget.warningThreshold, budget.alertThreshold)
+
+                BudgetStatusData(
+                    budgetId = budget.id,
+                    categoryId = budget.categoryId,
+                    categoryName = budget.categoryName,
+                    categoryColor = budget.categoryColor,
+                    budgetLimit = budget.limit,
+                    spent = spent,
+                    remaining = remaining,
+                    percentage = percentage,
+                    state = state
+                )
             }
         }
+
+    suspend fun createBudget(budget: Budget): Long {
+        val inserted = db.from("budgets").insert(budget.toInsertDto()) { select() }
+            .decodeSingle<BudgetDto>()
+        refresh()
+        return inserted.id ?: 0L
     }
 
-    fun getBudgetsWithSpending(periodStart: LocalDate, periodEnd: LocalDate): Flow<List<BudgetStatusData>> {
-        return _refreshTrigger.map {
-            withContext(Dispatchers.IO) {
-                transaction {
-                    val budgets = Budgets.join(Categories, JoinType.INNER, Budgets.categoryId, Categories.id)
-                        .selectAll()
-                        .map { it.toBudget() }
-
-                    // Pre-fetch which transaction IDs (in the period) have splits — those
-                    // bypass the main categoryId-based aggregation.
-                    val periodStartDt = periodStart.atStartOfDay()
-                    val periodEndDt = periodEnd.atTime(23, 59, 59)
-                    val transactionsWithSplits: Set<Long> = TransactionSplits
-                        .join(Transactions, JoinType.INNER, TransactionSplits.transactionId, Transactions.id)
-                        .selectAll()
-                        .where {
-                            (Transactions.date greaterEq periodStartDt) and
-                                    (Transactions.date lessEq periodEndDt) and
-                                    (Transactions.transactionType eq TransactionType.EXPENSE.name)
-                        }
-                        .map { it[Transactions.id] }
-                        .toSet()
-
-                    budgets.map { budget ->
-                        // Spending breakdown:
-                        // 1) "Plain" amount = sum of EXPENSE transactions whose categoryId matches
-                        //    AND that do NOT have any split (splits override the main category).
-                        val plainSpent = Transactions.selectAll().where {
-                            (Transactions.categoryId eq budget.categoryId) and
-                                    (Transactions.transactionType eq TransactionType.EXPENSE.name) and
-                                    (Transactions.date greaterEq periodStartDt) and
-                                    (Transactions.date lessEq periodEndDt)
-                        }
-                            .filter { it[Transactions.id] !in transactionsWithSplits }
-                            .map { it[Transactions.amount] }
-                            .fold(BigDecimal.ZERO) { acc, amount -> acc.add(amount) }
-
-                        // 2) Split-based amount = sum of split.amount where split.categoryId matches
-                        //    for transactions in the period.
-                        val splitSpent = TransactionSplits
-                            .join(Transactions, JoinType.INNER, TransactionSplits.transactionId, Transactions.id)
-                            .selectAll()
-                            .where {
-                                (TransactionSplits.categoryId eq budget.categoryId) and
-                                        (Transactions.transactionType eq TransactionType.EXPENSE.name) and
-                                        (Transactions.date greaterEq periodStartDt) and
-                                        (Transactions.date lessEq periodEndDt)
-                            }
-                            .map { it[TransactionSplits.amount] }
-                            .fold(BigDecimal.ZERO) { acc, amount -> acc.add(amount) }
-
-                        val spent = plainSpent.add(splitSpent)
-
-                        val percentage = if (budget.limit.compareTo(BigDecimal.ZERO) != 0) {
-                            spent.divide(budget.limit, 4, RoundingMode.HALF_UP).toFloat()
-                        } else {
-                            0f
-                        }
-
-                        val remaining = budget.limit.subtract(spent).let {
-                            if (it < BigDecimal.ZERO) BigDecimal.ZERO else it
-                        }
-
-                        val state = BudgetState.fromPercentage(
-                            percentage,
-                            budget.warningThreshold,
-                            budget.alertThreshold
-                        )
-
-                        BudgetStatusData(
-                            budgetId = budget.id,
-                            categoryId = budget.categoryId,
-                            categoryName = budget.categoryName,
-                            categoryColor = budget.categoryColor,
-                            budgetLimit = budget.limit,
-                            spent = spent,
-                            remaining = remaining,
-                            percentage = percentage,
-                            state = state
-                        )
-                    }
-                }
-            }
-        }
-    }
-
-    suspend fun createBudget(budget: Budget): Long = withContext(Dispatchers.IO) {
-        transaction {
-            Budgets.insert {
-                it[categoryId] = budget.categoryId
-                it[periodType] = budget.periodType.name
-                it[limit] = budget.limit
-                it[alertThreshold] = budget.alertThreshold
-                it[warningThreshold] = budget.warningThreshold
-                it[startDate] = budget.startDate
-                it[endDate] = budget.endDate
-            } get Budgets.id
-        }.also { refresh() }
-    }
-
-    /**
-     * Used by undo: restore a deleted budget with its original ID.
-     * If the row still exists (race), this is a no-op.
-     */
-    suspend fun restoreBudgetWithId(budget: Budget) = withContext(Dispatchers.IO) {
-        transaction {
-            val exists = Budgets.selectAll().where { Budgets.id eq budget.id }.count() > 0L
-            if (!exists) {
-                Budgets.insert {
-                    it[id] = budget.id
-                    it[categoryId] = budget.categoryId
-                    it[periodType] = budget.periodType.name
-                    it[limit] = budget.limit
-                    it[alertThreshold] = budget.alertThreshold
-                    it[warningThreshold] = budget.warningThreshold
-                    it[startDate] = budget.startDate
-                    it[endDate] = budget.endDate
-                }
-            }
+    /** Undo : recrée un budget supprimé avec son ID d'origine (no-op s'il existe déjà). */
+    suspend fun restoreBudgetWithId(budget: Budget) {
+        val exists = db.from("budgets").select { filter { eq("id", budget.id) } }
+            .decodeList<BudgetDto>().isNotEmpty()
+        if (!exists) {
+            db.from("budgets").insert(budget.toInsertDto().copy(id = budget.id))
         }
         refresh()
     }
 
-    suspend fun updateBudget(budget: Budget) = withContext(Dispatchers.IO) {
-        transaction {
-            Budgets.update({ Budgets.id eq budget.id }) {
-                it[categoryId] = budget.categoryId
-                it[periodType] = budget.periodType.name
-                it[limit] = budget.limit
-                it[alertThreshold] = budget.alertThreshold
-                it[warningThreshold] = budget.warningThreshold
-                it[startDate] = budget.startDate
-                it[endDate] = budget.endDate
-            }
+    suspend fun updateBudget(budget: Budget) {
+        db.from("budgets").update(budget.toInsertDto().copy(id = budget.id)) {
+            filter { eq("id", budget.id) }
         }
         refresh()
     }
 
-    suspend fun deleteBudget(id: Long) = withContext(Dispatchers.IO) {
-        transaction {
-            Budgets.deleteWhere { Budgets.id eq id }
-        }
+    suspend fun deleteBudget(id: Long) {
+        db.from("budgets").delete { filter { eq("id", id) } }
         refresh()
     }
 
-    private fun ResultRow.toBudget(): Budget {
-        return Budget(
-            id = this[Budgets.id],
-            categoryId = this[Budgets.categoryId],
-            categoryName = this[Categories.name],
-            categoryColor = this[Categories.color],
-            periodType = BudgetPeriodType.valueOf(this[Budgets.periodType]),
-            limit = this[Budgets.limit],
-            alertThreshold = this[Budgets.alertThreshold],
-            warningThreshold = this[Budgets.warningThreshold],
-            startDate = this[Budgets.startDate],
-            endDate = this[Budgets.endDate]
-        )
-    }
+    private fun BudgetDto.toDomain() = Budget(
+        id = id ?: 0,
+        categoryId = categoryId,
+        categoryName = category?.name ?: "",
+        categoryColor = category?.color ?: "#999999",
+        periodType = BudgetPeriodType.valueOf(periodType),
+        limit = budgetLimit,
+        alertThreshold = alertThreshold,
+        warningThreshold = warningThreshold,
+        startDate = DtoDates.parseDate(startDate),
+        endDate = DtoDates.parseDate(endDate)
+    )
+
+    private fun Budget.toInsertDto() = BudgetDto(
+        categoryId = categoryId,
+        periodType = periodType.name,
+        budgetLimit = limit,
+        alertThreshold = alertThreshold,
+        warningThreshold = warningThreshold,
+        startDate = startDate?.let { DtoDates.formatDate(it) },
+        endDate = endDate?.let { DtoDates.formatDate(it) }
+    )
 }

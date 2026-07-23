@@ -1,277 +1,226 @@
 package com.budgetmanager.data.repository
 
-import com.budgetmanager.data.database.Accounts
-import com.budgetmanager.data.database.Categories
-import com.budgetmanager.data.database.Transactions
+import com.budgetmanager.data.remote.BigDecimalSerializer
+import com.budgetmanager.data.remote.DtoDates
+import com.budgetmanager.data.remote.SupabaseClientProvider
+import com.budgetmanager.data.remote.dto.TransactionDto
 import com.budgetmanager.domain.model.CategorySpendingData
 import com.budgetmanager.domain.model.Transaction
 import com.budgetmanager.domain.model.TransactionType
-import kotlinx.coroutines.Dispatchers
+import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.query.Columns
+import io.github.jan.supabase.postgrest.query.Order
+import io.github.jan.supabase.postgrest.rpc
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.withContext
-import org.jetbrains.exposed.sql.*
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
-import org.jetbrains.exposed.sql.transactions.transaction
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 import java.math.BigDecimal
 import java.time.LocalDateTime
 import java.time.YearMonth
 
+@Serializable
+private data class CreateTxnParams(
+    @SerialName("p_account_id") val accountId: Long,
+    @SerialName("p_title") val title: String,
+    @SerialName("p_amount") @Serializable(with = BigDecimalSerializer::class) val amount: BigDecimal,
+    @SerialName("p_type") val type: String,
+    @SerialName("p_date") val date: String,
+    @SerialName("p_category_id") val categoryId: Long? = null,
+    @SerialName("p_notes") val notes: String? = null,
+    @SerialName("p_is_recurring") val isRecurring: Boolean = false,
+    @SerialName("p_recurring_id") val recurringId: Long? = null
+)
+
+@Serializable
+private data class UpdateTxnParams(
+    @SerialName("p_id") val id: Long,
+    @SerialName("p_account_id") val accountId: Long,
+    @SerialName("p_title") val title: String,
+    @SerialName("p_amount") @Serializable(with = BigDecimalSerializer::class) val amount: BigDecimal,
+    @SerialName("p_type") val type: String,
+    @SerialName("p_date") val date: String,
+    @SerialName("p_category_id") val categoryId: Long? = null,
+    @SerialName("p_notes") val notes: String? = null,
+    @SerialName("p_is_recurring") val isRecurring: Boolean = false,
+    @SerialName("p_recurring_id") val recurringId: Long? = null
+)
+
+@Serializable private data class DeleteTxnParams(@SerialName("p_id") val id: Long)
+
+/**
+ * Repository Transactions — backend Supabase (Postgrest). Les mutations qui
+ * touchent le solde passent par des fonctions RPC atomiques (insert/update/delete
+ * + ajustement du solde). Les tags normalisés sont synchronisés via TagRepository.
+ */
 class TransactionRepository(
+    private val provider: SupabaseClientProvider,
     private val accountRepository: AccountRepository,
     private val tagRepository: TagRepository? = null
 ) {
 
+    private val db get() = provider.client
     private val _refreshTrigger = MutableStateFlow(0L)
+
+    private val cols = Columns.raw(
+        "*, category:categories(name,color), account:accounts(name), tag_links:transaction_tags(tag:tags(name))"
+    )
 
     fun refresh() {
         _refreshTrigger.value = System.currentTimeMillis()
     }
 
-    private fun baseQuery(): ColumnSet {
-        return Transactions
-            .join(Accounts, JoinType.LEFT, Transactions.accountId, Accounts.id)
-            .join(Categories, JoinType.LEFT, Transactions.categoryId, Categories.id)
+    fun getAllTransactions(): Flow<List<Transaction>> = _refreshTrigger.map {
+        db.from("transactions").select(cols) {
+            order("date", Order.DESCENDING)
+        }.decodeList<TransactionDto>().map { it.toDomain() }
     }
 
-    fun getAllTransactions(): Flow<List<Transaction>> {
-        return _refreshTrigger.map {
-            withContext(Dispatchers.IO) {
-                transaction {
-                    baseQuery().selectAll()
-                        .orderBy(Transactions.date, SortOrder.DESC)
-                        .map { it.toTransaction() }
+    fun getTransactionsByDateRange(start: LocalDateTime, end: LocalDateTime): Flow<List<Transaction>> =
+        _refreshTrigger.map {
+            db.from("transactions").select(cols) {
+                filter {
+                    gte("date", DtoDates.formatDateTime(start))
+                    lte("date", DtoDates.formatDateTime(end))
                 }
-            }
+                order("date", Order.DESCENDING)
+            }.decodeList<TransactionDto>().map { it.toDomain() }
         }
-    }
-
-    fun getTransactionsByDateRange(start: LocalDateTime, end: LocalDateTime): Flow<List<Transaction>> {
-        return _refreshTrigger.map {
-            withContext(Dispatchers.IO) {
-                transaction {
-                    baseQuery().selectAll().where {
-                        (Transactions.date greaterEq start) and (Transactions.date lessEq end)
-                    }.orderBy(Transactions.date, SortOrder.DESC)
-                        .map { it.toTransaction() }
-                }
-            }
-        }
-    }
 
     fun getCurrentMonthTransactions(): Flow<List<Transaction>> {
         val now = YearMonth.now()
-        val start = now.atDay(1).atStartOfDay()
-        val end = now.atEndOfMonth().atTime(23, 59, 59)
-        return getTransactionsByDateRange(start, end)
+        return getTransactionsByDateRange(now.atDay(1).atStartOfDay(), now.atEndOfMonth().atTime(23, 59, 59))
     }
 
-    fun searchTransactions(query: String): Flow<List<Transaction>> {
-        return _refreshTrigger.map {
-            withContext(Dispatchers.IO) {
-                transaction {
-                    baseQuery().selectAll().where {
-                        (Transactions.title like "%$query%") or
-                                (Transactions.notes like "%$query%")
-                    }.orderBy(Transactions.date, SortOrder.DESC)
-                        .map { it.toTransaction() }
+    fun searchTransactions(query: String): Flow<List<Transaction>> = _refreshTrigger.map {
+        db.from("transactions").select(cols) {
+            filter {
+                or {
+                    ilike("title", "%$query%")
+                    ilike("notes", "%$query%")
                 }
             }
-        }
+            order("date", Order.DESCENDING)
+        }.decodeList<TransactionDto>().map { it.toDomain() }
     }
 
-    suspend fun getTransactionById(id: Long): Transaction? = withContext(Dispatchers.IO) {
-        transaction {
-            baseQuery().selectAll()
-                .where { Transactions.id eq id }
-                .map { it.toTransaction() }
-                .singleOrNull()
-        }
-    }
+    suspend fun getTransactionById(id: Long): Transaction? =
+        db.from("transactions").select(cols) { filter { eq("id", id) } }
+            .decodeList<TransactionDto>().firstOrNull()?.toDomain()
 
-    suspend fun createTransaction(txn: Transaction): Long = withContext(Dispatchers.IO) {
-        val id = transaction {
-            Transactions.insert {
-                it[accountId] = txn.accountId
-                it[categoryId] = txn.categoryId
-                it[title] = txn.title
-                it[amount] = txn.amount
-                it[transactionType] = txn.transactionType.name
-                it[date] = txn.date
-                it[notes] = txn.notes
-                it[tags] = txn.tags.joinToString(",")
-                it[isRecurring] = txn.isRecurring
-                it[recurringTransactionId] = txn.recurringTransactionId
-                it[createdAt] = txn.createdAt
-            } get Transactions.id
-        }
+    suspend fun createTransaction(txn: Transaction): Long {
+        val id = db.postgrest.rpc(
+            "create_transaction",
+            CreateTxnParams(
+                accountId = txn.accountId,
+                title = txn.title,
+                amount = txn.amount,
+                type = txn.transactionType.name,
+                date = DtoDates.formatDateTime(txn.date),
+                categoryId = txn.categoryId,
+                notes = txn.notes,
+                isRecurring = txn.isRecurring,
+                recurringId = txn.recurringTransactionId
+            )
+        ).decodeAs<Long>()
 
-        // Sync to normalized tag table (if available)
         tagRepository?.setTransactionTags(id, txn.tags)
-
-        // Update account balance
-        val balanceChange = when (txn.transactionType) {
-            TransactionType.EXPENSE -> txn.amount.negate()
-            TransactionType.INCOME -> txn.amount
-            TransactionType.TRANSFER -> BigDecimal.ZERO
-        }
-        if (balanceChange.compareTo(BigDecimal.ZERO) != 0) {
-            accountRepository.updateBalance(txn.accountId, balanceChange)
-        }
-
+        accountRepository.refresh()
         refresh()
-        id
+        return id
     }
 
-    suspend fun updateTransaction(old: Transaction, new: Transaction): Result<Unit> =
-        withContext(Dispatchers.IO) {
-            runCatching {
-                transaction {
-                    Transactions.update({ Transactions.id eq new.id }) {
-                        it[accountId] = new.accountId
-                        it[categoryId] = new.categoryId
-                        it[title] = new.title
-                        it[amount] = new.amount
-                        it[transactionType] = new.transactionType.name
-                        it[date] = new.date
-                        it[notes] = new.notes
-                        it[tags] = new.tags.joinToString(",")
-                        it[isRecurring] = new.isRecurring
-                        it[recurringTransactionId] = new.recurringTransactionId
-                    }
-                }
+    suspend fun updateTransaction(old: Transaction, new: Transaction): Result<Unit> = runCatching {
+        db.postgrest.rpc(
+            "update_transaction",
+            UpdateTxnParams(
+                id = new.id,
+                accountId = new.accountId,
+                title = new.title,
+                amount = new.amount,
+                type = new.transactionType.name,
+                date = DtoDates.formatDateTime(new.date),
+                categoryId = new.categoryId,
+                notes = new.notes,
+                isRecurring = new.isRecurring,
+                recurringId = new.recurringTransactionId
+            )
+        )
+        tagRepository?.setTransactionTags(new.id, new.tags)
+        accountRepository.refresh()
+        refresh()
+    }
 
-                // Sync to normalized tag table
-                tagRepository?.setTransactionTags(new.id, new.tags)
-
-                // Reverse old balance effect
-                val oldBalanceChange = when (old.transactionType) {
-                    TransactionType.EXPENSE -> old.amount // reverse: add back
-                    TransactionType.INCOME -> old.amount.negate() // reverse: subtract
-                    TransactionType.TRANSFER -> BigDecimal.ZERO
-                }
-                if (oldBalanceChange.compareTo(BigDecimal.ZERO) != 0) {
-                    accountRepository.updateBalance(old.accountId, oldBalanceChange)
-                }
-
-                // Apply new balance effect
-                val newBalanceChange = when (new.transactionType) {
-                    TransactionType.EXPENSE -> new.amount.negate()
-                    TransactionType.INCOME -> new.amount
-                    TransactionType.TRANSFER -> BigDecimal.ZERO
-                }
-                if (newBalanceChange.compareTo(BigDecimal.ZERO) != 0) {
-                    accountRepository.updateBalance(new.accountId, newBalanceChange)
-                }
-
-                refresh()
-            }
-        }
-
-    suspend fun deleteTransaction(txn: Transaction): Result<Unit> =
-        withContext(Dispatchers.IO) {
-            runCatching {
-                transaction {
-                    Transactions.deleteWhere { id eq txn.id }
-                }
-
-                // Reverse balance effect
-                val balanceChange = when (txn.transactionType) {
-                    TransactionType.EXPENSE -> txn.amount // add back
-                    TransactionType.INCOME -> txn.amount.negate() // subtract
-                    TransactionType.TRANSFER -> BigDecimal.ZERO
-                }
-                if (balanceChange.compareTo(BigDecimal.ZERO) != 0) {
-                    accountRepository.updateBalance(txn.accountId, balanceChange)
-                }
-
-                refresh()
-            }
-        }
+    suspend fun deleteTransaction(txn: Transaction): Result<Unit> = runCatching {
+        db.postgrest.rpc("delete_transaction", DeleteTxnParams(txn.id))
+        accountRepository.refresh()
+        refresh()
+    }
 
     suspend fun getTotalIncome(start: LocalDateTime, end: LocalDateTime): BigDecimal =
-        withContext(Dispatchers.IO) {
-            transaction {
-                Transactions.selectAll().where {
-                    (Transactions.transactionType eq TransactionType.INCOME.name) and
-                            (Transactions.date greaterEq start) and
-                            (Transactions.date lessEq end)
-                }.map { it[Transactions.amount] }
-                    .fold(BigDecimal.ZERO) { acc, amount -> acc.add(amount) }
-            }
-        }
+        sumAmounts(TransactionType.INCOME, start, end)
 
     suspend fun getTotalExpenses(start: LocalDateTime, end: LocalDateTime): BigDecimal =
-        withContext(Dispatchers.IO) {
-            transaction {
-                Transactions.selectAll().where {
-                    (Transactions.transactionType eq TransactionType.EXPENSE.name) and
-                            (Transactions.date greaterEq start) and
-                            (Transactions.date lessEq end)
-                }.map { it[Transactions.amount] }
-                    .fold(BigDecimal.ZERO) { acc, amount -> acc.add(amount) }
+        sumAmounts(TransactionType.EXPENSE, start, end)
+
+    private suspend fun sumAmounts(type: TransactionType, start: LocalDateTime, end: LocalDateTime): BigDecimal =
+        db.from("transactions").select {
+            filter {
+                eq("transaction_type", type.name)
+                gte("date", DtoDates.formatDateTime(start))
+                lte("date", DtoDates.formatDateTime(end))
             }
-        }
+        }.decodeList<TransactionDto>().fold(BigDecimal.ZERO) { acc, dto -> acc.add(dto.amount) }
 
-    fun getCategorySpending(start: LocalDateTime, end: LocalDateTime): Flow<List<CategorySpendingData>> {
-        return _refreshTrigger.map {
-            withContext(Dispatchers.IO) {
-                transaction {
-                    val results = mutableMapOf<Long, CategorySpendingData>()
+    fun getCategorySpending(start: LocalDateTime, end: LocalDateTime): Flow<List<CategorySpendingData>> =
+        _refreshTrigger.map {
+            val rows = db.from("transactions").select(cols) {
+                filter {
+                    eq("transaction_type", TransactionType.EXPENSE.name)
+                    gte("date", DtoDates.formatDateTime(start))
+                    lte("date", DtoDates.formatDateTime(end))
+                }
+            }.decodeList<TransactionDto>()
 
-                    baseQuery().selectAll().where {
-                        (Transactions.transactionType eq TransactionType.EXPENSE.name) and
-                                (Transactions.date greaterEq start) and
-                                (Transactions.date lessEq end) and
-                                (Transactions.categoryId.isNotNull())
-                    }.forEach { row ->
-                        val catId = row[Transactions.categoryId]!!
-                        val catName = row[Categories.name]
-                        val catColor = row[Categories.color]
-                        val amount = row[Transactions.amount]
-
-                        val existing = results[catId]
-                        if (existing != null) {
-                            results[catId] = existing.copy(
-                                totalSpent = existing.totalSpent.add(amount),
-                                transactionCount = existing.transactionCount + 1
-                            )
-                        } else {
-                            results[catId] = CategorySpendingData(
-                                categoryId = catId,
-                                categoryName = catName,
-                                categoryColor = catColor,
-                                totalSpent = amount,
-                                transactionCount = 1
-                            )
-                        }
-                    }
-
-                    results.values.sortedByDescending { it.totalSpent }
+            val results = mutableMapOf<Long, CategorySpendingData>()
+            rows.forEach { dto ->
+                val catId = dto.categoryId ?: return@forEach  // ignore les dépenses sans catégorie
+                val existing = results[catId]
+                results[catId] = if (existing != null) {
+                    existing.copy(
+                        totalSpent = existing.totalSpent.add(dto.amount),
+                        transactionCount = existing.transactionCount + 1
+                    )
+                } else {
+                    CategorySpendingData(
+                        categoryId = catId,
+                        categoryName = dto.category?.name ?: "",
+                        categoryColor = dto.category?.color ?: "#999999",
+                        totalSpent = dto.amount,
+                        transactionCount = 1
+                    )
                 }
             }
+            results.values.sortedByDescending { it.totalSpent }
         }
-    }
 
-    private fun ResultRow.toTransaction(): Transaction {
-        val tagsStr = this[Transactions.tags]
-        return Transaction(
-            id = this[Transactions.id],
-            accountId = this[Transactions.accountId],
-            accountName = try { this.getOrNull(Accounts.name) } catch (_: Exception) { null },
-            categoryId = this[Transactions.categoryId],
-            categoryName = try { this.getOrNull(Categories.name) } catch (_: Exception) { null },
-            categoryColor = try { this.getOrNull(Categories.color) } catch (_: Exception) { null },
-            title = this[Transactions.title],
-            amount = this[Transactions.amount],
-            transactionType = TransactionType.valueOf(this[Transactions.transactionType]),
-            date = this[Transactions.date],
-            notes = this[Transactions.notes],
-            tags = if (tagsStr.isBlank()) emptyList() else tagsStr.split(",").filter { it.isNotBlank() },
-            isRecurring = this[Transactions.isRecurring],
-            recurringTransactionId = this[Transactions.recurringTransactionId],
-            createdAt = this[Transactions.createdAt]
-        )
-    }
+    private fun TransactionDto.toDomain() = Transaction(
+        id = id ?: 0,
+        accountId = accountId,
+        accountName = account?.name,
+        categoryId = categoryId,
+        categoryName = category?.name,
+        categoryColor = category?.color,
+        title = title,
+        amount = amount,
+        transactionType = TransactionType.valueOf(transactionType),
+        date = DtoDates.parseDateTime(date) ?: LocalDateTime.now(),
+        notes = notes,
+        tags = tagLinks?.mapNotNull { it.tag?.name } ?: emptyList(),
+        isRecurring = isRecurring,
+        recurringTransactionId = recurringTransactionId,
+        createdAt = DtoDates.parseDateTime(createdAt) ?: LocalDateTime.now()
+    )
 }
