@@ -11,7 +11,7 @@
 
 do $$
 declare
-    v_email text := 'dev@finanssor.fr';   -- <<< REMPLACE PAR TON E-MAIL
+    v_email text := 'l.babouram@finanssor.fr';   -- <<< REMPLACE PAR TON E-MAIL
     v_user  uuid;
     v_acc   bigint;
     c_alim bigint; c_transport bigint; c_logement bigint;
