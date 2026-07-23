@@ -1,0 +1,8 @@
+# Modèle de configuration Supabase.
+# Copier ce fichier en `supabase.properties` (même dossier) et renseigner tes valeurs.
+# Les valeurs se trouvent dans le dashboard Supabase : Project Settings -> API.
+#
+# La anon key est publique par design (protégée par la Row-Level Security),
+# mais on garde `supabase.properties` hors du dépôt git (voir .gitignore).
+SUPABASE_URL=https://VOTRE-PROJET.supabase.co
+SUPABASE_ANON_KEY=VOTRE_ANON_KEY

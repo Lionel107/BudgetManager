@@ -2,6 +2,7 @@ import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
 plugins {
     kotlin("jvm") version "1.9.23"
+    kotlin("plugin.serialization") version "1.9.23"
     id("org.jetbrains.compose") version "1.6.1"
 }
 
@@ -33,6 +34,16 @@ dependencies {
 
     // Koin DI
     implementation("io.insert-koin:koin-core:3.5.3")
+
+    // Supabase (backend synchro : Postgrest + Auth) — Phase 2
+    // NB : version 2.x (Kotlin 1.9.23) → module auth = "gotrue-kt" (renommé "auth-kt" en 3.0.0/Kotlin 2.0)
+    implementation(platform("io.github.jan-tennert.supabase:bom:2.5.4"))
+    implementation("io.github.jan-tennert.supabase:postgrest-kt")
+    implementation("io.github.jan-tennert.supabase:gotrue-kt")
+    // Moteur HTTP Ktor requis par supabase-kt
+    implementation("io.ktor:ktor-client-cio:2.3.12")
+    // Sérialisation JSON (DTO <-> API REST Supabase)
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 
     // Logging
     implementation("org.slf4j:slf4j-simple:2.0.9")

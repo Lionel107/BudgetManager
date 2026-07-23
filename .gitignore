@@ -40,3 +40,5 @@ desktop.ini
 local.properties
 secrets.properties
 *.local.properties
+# Config Supabase réelle (le modèle .example est versionné, lui)
+src/main/resources/supabase.properties
