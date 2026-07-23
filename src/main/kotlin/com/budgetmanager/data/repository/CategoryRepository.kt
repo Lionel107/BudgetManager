@@ -1,233 +1,176 @@
 package com.budgetmanager.data.repository
 
-import com.budgetmanager.data.database.Categories
+import com.budgetmanager.data.remote.SupabaseClientProvider
+import com.budgetmanager.data.remote.dto.CategoryDto
 import com.budgetmanager.domain.model.Category
 import com.budgetmanager.domain.model.TransactionType
-import kotlinx.coroutines.Dispatchers
+import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.postgrest.query.Order
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.withContext
-import org.jetbrains.exposed.sql.*
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
-import org.jetbrains.exposed.sql.transactions.transaction
 
-class CategoryRepository {
+/**
+ * Repository Catégories — backend Supabase (Postgrest).
+ * La RLS filtre automatiquement par utilisateur ; user_id est rempli à l'insert
+ * par le défaut auth.uid() côté Postgres. Le pattern Flow + _refreshTrigger est
+ * conservé : chaque écriture appelle refresh() pour re-déclencher les lectures.
+ */
+class CategoryRepository(private val provider: SupabaseClientProvider) {
 
+    private val db get() = provider.client
     private val _refreshTrigger = MutableStateFlow(0L)
 
     fun refresh() {
         _refreshTrigger.value = System.currentTimeMillis()
     }
 
-    /** Returns only active (non-soft-deleted) categories. Use getAllIncludingInactive() to see deleted ones. */
-    fun getAllCategories(): Flow<List<Category>> {
-        return _refreshTrigger.map {
-            withContext(Dispatchers.IO) {
-                transaction {
-                    Categories.selectAll()
-                        .where { Categories.isActive eq true }
-                        .orderBy(Categories.displayOrder)
-                        .map { it.toCategory() }
-                }
+    fun getAllCategories(): Flow<List<Category>> = _refreshTrigger.map {
+        db.from("categories").select {
+            filter { eq("is_active", true) }
+            order("display_order", Order.ASCENDING)
+        }.decodeList<CategoryDto>().map { it.toDomain() }
+    }
+
+    fun getAllCategoriesIncludingInactive(): Flow<List<Category>> = _refreshTrigger.map {
+        db.from("categories").select {
+            order("display_order", Order.ASCENDING)
+        }.decodeList<CategoryDto>().map { it.toDomain() }
+    }
+
+    fun getExpenseCategories(): Flow<List<Category>> = _refreshTrigger.map {
+        db.from("categories").select {
+            filter {
+                eq("category_type", TransactionType.EXPENSE.name)
+                eq("is_active", true)
             }
-        }
+            order("display_order", Order.ASCENDING)
+        }.decodeList<CategoryDto>().map { it.toDomain() }
     }
 
-    fun getAllCategoriesIncludingInactive(): Flow<List<Category>> {
-        return _refreshTrigger.map {
-            withContext(Dispatchers.IO) {
-                transaction {
-                    Categories.selectAll()
-                        .orderBy(Categories.displayOrder)
-                        .map { it.toCategory() }
-                }
+    fun getIncomeCategories(): Flow<List<Category>> = _refreshTrigger.map {
+        db.from("categories").select {
+            filter {
+                eq("category_type", TransactionType.INCOME.name)
+                eq("is_active", true)
             }
-        }
+            order("display_order", Order.ASCENDING)
+        }.decodeList<CategoryDto>().map { it.toDomain() }
     }
 
-    fun getExpenseCategories(): Flow<List<Category>> {
-        return _refreshTrigger.map {
-            withContext(Dispatchers.IO) {
-                transaction {
-                    Categories.selectAll()
-                        .where {
-                            (Categories.categoryType eq TransactionType.EXPENSE.name) and
-                            (Categories.isActive eq true)
-                        }
-                        .orderBy(Categories.displayOrder)
-                        .map { it.toCategory() }
-                }
-            }
-        }
+    suspend fun getCategoryById(id: Long): Category? =
+        db.from("categories").select {
+            filter { eq("id", id) }
+        }.decodeList<CategoryDto>().firstOrNull()?.toDomain()
+
+    suspend fun createCategory(category: Category): Long {
+        val inserted = db.from("categories").insert(category.toInsertDto()) {
+            select()
+        }.decodeSingle<CategoryDto>()
+        refresh()
+        return inserted.id ?: 0L
     }
 
-    fun getIncomeCategories(): Flow<List<Category>> {
-        return _refreshTrigger.map {
-            withContext(Dispatchers.IO) {
-                transaction {
-                    Categories.selectAll()
-                        .where {
-                            (Categories.categoryType eq TransactionType.INCOME.name) and
-                            (Categories.isActive eq true)
-                        }
-                        .orderBy(Categories.displayOrder)
-                        .map { it.toCategory() }
-                }
-            }
-        }
-    }
-
-    suspend fun getCategoryById(id: Long): Category? = withContext(Dispatchers.IO) {
-        transaction {
-            Categories.selectAll()
-                .where { Categories.id eq id }
-                .map { it.toCategory() }
-                .singleOrNull()
-        }
-    }
-
-    suspend fun createCategory(category: Category): Long = withContext(Dispatchers.IO) {
-        transaction {
-            Categories.insert {
-                it[name] = category.name
-                it[categoryType] = category.categoryType.name
-                it[parentId] = category.parentId
-                it[color] = category.color
-                it[iconName] = category.iconName
-                it[isDefault] = category.isDefault
-                it[displayOrder] = category.displayOrder
-            } get Categories.id
-        }.also { refresh() }
-    }
-
-    suspend fun updateCategory(category: Category) = withContext(Dispatchers.IO) {
-        transaction {
-            Categories.update({ Categories.id eq category.id }) {
-                it[name] = category.name
-                it[categoryType] = category.categoryType.name
-                it[parentId] = category.parentId
-                it[color] = category.color
-                it[iconName] = category.iconName
-                it[isDefault] = category.isDefault
-                it[displayOrder] = category.displayOrder
-            }
+    suspend fun updateCategory(category: Category) {
+        db.from("categories").update(category.toInsertDto().copy(id = category.id)) {
+            filter { eq("id", category.id) }
         }
         refresh()
     }
 
-    /** Soft-delete: marks category inactive. Linked transactions keep referencing it. */
-    suspend fun deleteCategory(id: Long) = withContext(Dispatchers.IO) {
-        transaction {
-            Categories.update({ Categories.id eq id }) {
-                it[isActive] = false
-            }
+    /** Soft-delete : marque la catégorie inactive. */
+    suspend fun deleteCategory(id: Long) {
+        db.from("categories").update({ set("is_active", false) }) {
+            filter { eq("id", id) }
         }
         refresh()
     }
 
-    /** Hard-delete reserved for cleanup. */
-    suspend fun hardDeleteCategory(id: Long) = withContext(Dispatchers.IO) {
-        transaction {
-            Categories.deleteWhere { Categories.id eq id }
+    /** Hard-delete réservé au nettoyage. */
+    suspend fun hardDeleteCategory(id: Long) {
+        db.from("categories").delete { filter { eq("id", id) } }
+        refresh()
+    }
+
+    suspend fun restoreCategory(id: Long) {
+        db.from("categories").update({ set("is_active", true) }) {
+            filter { eq("id", id) }
         }
         refresh()
     }
 
-    suspend fun restoreCategory(id: Long) = withContext(Dispatchers.IO) {
-        transaction {
-            Categories.update({ Categories.id eq id }) {
-                it[isActive] = true
-            }
-        }
-        refresh()
-    }
+    /** Échange le displayOrder de deux catégories (renumérote si doublons). */
+    suspend fun swapDisplayOrder(idA: Long, idB: Long) {
+        val all = db.from("categories").select {
+            order("display_order", Order.ASCENDING)
+        }.decodeList<CategoryDto>()
 
-    /**
-     * Swap displayOrder between two categories. Normalizes first to handle
-     * legacy data with duplicate orders.
-     */
-    suspend fun swapDisplayOrder(idA: Long, idB: Long) = withContext(Dispatchers.IO) {
-        transaction {
-            val all = Categories.selectAll()
-                .orderBy(Categories.displayOrder, SortOrder.ASC)
-                .orderBy(Categories.id, SortOrder.ASC)
-                .map { it[Categories.id] to it[Categories.displayOrder] }
-
-            val orders = all.map { it.second }.toSet()
-            if (orders.size < all.size) {
-                all.forEachIndexed { idx, (id, _) ->
-                    Categories.update({ Categories.id eq id }) { it[displayOrder] = idx }
-                }
-            }
-
-            val orderA = Categories.selectAll().where { Categories.id eq idA }
-                .map { it[Categories.displayOrder] }.singleOrNull() ?: return@transaction
-            val orderB = Categories.selectAll().where { Categories.id eq idB }
-                .map { it[Categories.displayOrder] }.singleOrNull() ?: return@transaction
-            Categories.update({ Categories.id eq idA }) { it[displayOrder] = orderB }
-            Categories.update({ Categories.id eq idB }) { it[displayOrder] = orderA }
-        }
-        refresh()
-    }
-
-    suspend fun createDefaultCategories() = withContext(Dispatchers.IO) {
-        transaction {
-            val existingCount = Categories.selectAll().count()
-            if (existingCount > 0) return@transaction
-
-            val expenseCategories = listOf(
-                Triple("Alimentation", "#4CAF50", "restaurant"),
-                Triple("Transport", "#2196F3", "directions_car"),
-                Triple("Logement", "#FF9800", "home"),
-                Triple("Loisirs", "#9C27B0", "sports_esports"),
-                Triple("Santé", "#F44336", "local_hospital"),
-                Triple("Shopping", "#E91E63", "shopping_bag"),
-                Triple("Éducation", "#00BCD4", "school")
-            )
-
-            val incomeCategories = listOf(
-                Triple("Salaire", "#4CAF50", "account_balance"),
-                Triple("Freelance", "#FF9800", "work"),
-                Triple("Investissements", "#2196F3", "trending_up")
-            )
-
-            expenseCategories.forEachIndexed { index, (name, color, icon) ->
-                Categories.insert {
-                    it[Categories.name] = name
-                    it[categoryType] = TransactionType.EXPENSE.name
-                    it[Categories.color] = color
-                    it[iconName] = icon
-                    it[isDefault] = true
-                    it[displayOrder] = index
-                }
-            }
-
-            incomeCategories.forEachIndexed { index, (name, color, icon) ->
-                Categories.insert {
-                    it[Categories.name] = name
-                    it[categoryType] = TransactionType.INCOME.name
-                    it[Categories.color] = color
-                    it[iconName] = icon
-                    it[isDefault] = true
-                    it[displayOrder] = index + expenseCategories.size
+        val orders = all.mapNotNull { it.displayOrder }.toSet()
+        if (orders.size < all.size) {
+            all.forEachIndexed { idx, dto ->
+                db.from("categories").update({ set("display_order", idx) }) {
+                    filter { eq("id", dto.id ?: return@forEachIndexed) }
                 }
             }
         }
+        val orderA = all.find { it.id == idA }?.displayOrder ?: return
+        val orderB = all.find { it.id == idB }?.displayOrder ?: return
+        db.from("categories").update({ set("display_order", orderB) }) { filter { eq("id", idA) } }
+        db.from("categories").update({ set("display_order", orderA) }) { filter { eq("id", idB) } }
         refresh()
     }
 
-    private fun ResultRow.toCategory(): Category {
-        return Category(
-            id = this[Categories.id],
-            name = this[Categories.name],
-            categoryType = TransactionType.valueOf(this[Categories.categoryType]),
-            parentId = this[Categories.parentId],
-            color = this[Categories.color],
-            iconName = this[Categories.iconName],
-            isDefault = this[Categories.isDefault],
-            displayOrder = this[Categories.displayOrder],
-            isActive = this[Categories.isActive]
+    /** Crée les catégories par défaut si l'utilisateur n'en a aucune. */
+    suspend fun createDefaultCategories() {
+        val existing = db.from("categories").select().decodeList<CategoryDto>()
+        if (existing.isNotEmpty()) return
+
+        val expense = listOf(
+            Triple("Alimentation", "#4CAF50", "restaurant"),
+            Triple("Transport", "#2196F3", "directions_car"),
+            Triple("Logement", "#FF9800", "home"),
+            Triple("Loisirs", "#9C27B0", "sports_esports"),
+            Triple("Santé", "#F44336", "local_hospital"),
+            Triple("Shopping", "#E91E63", "shopping_bag"),
+            Triple("Éducation", "#00BCD4", "school")
         )
+        val income = listOf(
+            Triple("Salaire", "#4CAF50", "account_balance"),
+            Triple("Freelance", "#FF9800", "work"),
+            Triple("Investissements", "#2196F3", "trending_up")
+        )
+
+        val dtos = expense.mapIndexed { i, (name, color, icon) ->
+            CategoryDto(name = name, categoryType = TransactionType.EXPENSE.name, color = color, iconName = icon, isDefault = true, displayOrder = i)
+        } + income.mapIndexed { i, (name, color, icon) ->
+            CategoryDto(name = name, categoryType = TransactionType.INCOME.name, color = color, iconName = icon, isDefault = true, displayOrder = i + expense.size)
+        }
+        db.from("categories").insert(dtos)
+        refresh()
     }
+
+    // ===== Mappers =====
+
+    private fun CategoryDto.toDomain() = Category(
+        id = id ?: 0,
+        name = name,
+        categoryType = TransactionType.valueOf(categoryType),
+        parentId = parentId,
+        color = color,
+        iconName = iconName,
+        isDefault = isDefault,
+        displayOrder = displayOrder,
+        isActive = isActive
+    )
+
+    private fun Category.toInsertDto() = CategoryDto(
+        name = name,
+        categoryType = categoryType.name,
+        parentId = parentId,
+        color = color,
+        iconName = iconName,
+        isDefault = isDefault,
+        displayOrder = displayOrder,
+        isActive = isActive
+    )
 }

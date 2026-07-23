@@ -22,15 +22,15 @@ val appModule = module {
     // Preferences
     single { AppPreferences() }
 
-    // Repositories
-    single { AccountRepository() }
-    single { CategoryRepository() }
+    // Repositories (backend Supabase)
+    single { AccountRepository(get()) }
+    single { CategoryRepository(get()) }
     single { TransactionRepository(get(), get()) }
     single { BudgetRepository() }
     single { RecurringTransactionRepository(get(), get()) }
-    single { com.budgetmanager.data.repository.TemplateRepository() }
-    single { com.budgetmanager.data.repository.TagRepository() }
-    single { com.budgetmanager.data.repository.SplitRepository() }
-    single { com.budgetmanager.data.repository.ChallengeRepository() }
-    single { com.budgetmanager.data.repository.ExchangeRateRepository() }
+    single { com.budgetmanager.data.repository.TemplateRepository(get()) }
+    single { com.budgetmanager.data.repository.TagRepository(get()) }
+    single { com.budgetmanager.data.repository.SplitRepository(get()) }
+    single { com.budgetmanager.data.repository.ChallengeRepository(get()) }
+    single { com.budgetmanager.data.repository.ExchangeRateRepository(get()) }
 }

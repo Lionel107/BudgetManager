@@ -1,252 +1,172 @@
 package com.budgetmanager.data.repository
 
-import com.budgetmanager.data.database.Accounts
-import com.budgetmanager.data.database.Transactions
+import com.budgetmanager.data.remote.BigDecimalSerializer
+import com.budgetmanager.data.remote.DtoDates
+import com.budgetmanager.data.remote.SupabaseClientProvider
+import com.budgetmanager.data.remote.dto.AccountDto
 import com.budgetmanager.domain.model.Account
 import com.budgetmanager.domain.model.AccountType
-import com.budgetmanager.domain.model.TransactionType
-import kotlinx.coroutines.Dispatchers
+import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.rpc
+import io.github.jan.supabase.postgrest.query.Order
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.withContext
-import org.jetbrains.exposed.sql.*
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
-import org.jetbrains.exposed.sql.transactions.transaction
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 import java.math.BigDecimal
 import java.time.LocalDateTime
 
-class AccountRepository {
+@Serializable
+private data class IncrementBalanceParams(
+    @SerialName("p_account_id") val accountId: Long,
+    @SerialName("p_delta") @Serializable(with = BigDecimalSerializer::class) val delta: BigDecimal
+)
 
+@Serializable
+private data class TransferParams(
+    @SerialName("p_from_id") val fromId: Long,
+    @SerialName("p_to_id") val toId: Long,
+    @SerialName("p_amount") @Serializable(with = BigDecimalSerializer::class) val amount: BigDecimal,
+    @SerialName("p_notes") val notes: String? = null
+)
+
+/**
+ * Repository Comptes — backend Supabase (Postgrest). Les opérations sur le solde
+ * (incrément atomique, transfert) passent par des fonctions RPC côté serveur.
+ */
+class AccountRepository(private val provider: SupabaseClientProvider) {
+
+    private val db get() = provider.client
     private val _refreshTrigger = MutableStateFlow(0L)
 
     fun refresh() {
         _refreshTrigger.value = System.currentTimeMillis()
     }
 
-    fun getActiveAccounts(): Flow<List<Account>> {
-        return _refreshTrigger.map {
-            withContext(Dispatchers.IO) {
-                transaction {
-                    Accounts.selectAll()
-                        .where { Accounts.isActive eq true }
-                        .orderBy(Accounts.displayOrder)
-                        .map { it.toAccount() }
+    fun getActiveAccounts(): Flow<List<Account>> = _refreshTrigger.map {
+        db.from("accounts").select {
+            filter { eq("is_active", true) }
+            order("display_order", Order.ASCENDING)
+        }.decodeList<AccountDto>().map { it.toDomain() }
+    }
+
+    fun getAllAccounts(): Flow<List<Account>> = _refreshTrigger.map {
+        db.from("accounts").select {
+            order("display_order", Order.ASCENDING)
+        }.decodeList<AccountDto>().map { it.toDomain() }
+    }
+
+    suspend fun getAccountById(id: Long): Account? =
+        db.from("accounts").select { filter { eq("id", id) } }
+            .decodeList<AccountDto>().firstOrNull()?.toDomain()
+
+    suspend fun createAccount(account: Account): Long {
+        val inserted = db.from("accounts").insert(account.toInsertDto()) { select() }
+            .decodeSingle<AccountDto>()
+        refresh()
+        return inserted.id ?: 0L
+    }
+
+    suspend fun updateAccount(account: Account) {
+        db.from("accounts").update(account.toInsertDto().copy(id = account.id)) {
+            filter { eq("id", account.id) }
+        }
+        refresh()
+    }
+
+    /** Incrément atomique du solde (RPC serveur). */
+    suspend fun updateBalance(accountId: Long, amount: BigDecimal) {
+        db.postgrest.rpc("increment_account_balance", IncrementBalanceParams(accountId, amount))
+        refresh()
+    }
+
+    /** Soft-delete : marque le compte inactif (préserve les transactions liées). */
+    suspend fun deleteAccount(accountId: Long) {
+        db.from("accounts").update({ set("is_active", false) }) {
+            filter { eq("id", accountId) }
+        }
+        refresh()
+    }
+
+    suspend fun hardDeleteAccount(accountId: Long) {
+        db.from("accounts").delete { filter { eq("id", accountId) } }
+        refresh()
+    }
+
+    suspend fun restoreAccount(accountId: Long) {
+        db.from("accounts").update({ set("is_active", true) }) {
+            filter { eq("id", accountId) }
+        }
+        refresh()
+    }
+
+    /** Échange le displayOrder de deux comptes (renumérote si doublons). */
+    suspend fun swapDisplayOrder(idA: Long, idB: Long) {
+        val all = db.from("accounts").select {
+            order("display_order", Order.ASCENDING)
+        }.decodeList<AccountDto>()
+
+        val orders = all.mapNotNull { it.displayOrder }.toSet()
+        if (orders.size < all.size) {
+            all.forEachIndexed { idx, dto ->
+                db.from("accounts").update({ set("display_order", idx) }) {
+                    filter { eq("id", dto.id ?: return@forEachIndexed) }
                 }
             }
         }
-    }
-
-    fun getAllAccounts(): Flow<List<Account>> {
-        return _refreshTrigger.map {
-            withContext(Dispatchers.IO) {
-                transaction {
-                    Accounts.selectAll()
-                        .orderBy(Accounts.displayOrder)
-                        .map { it.toAccount() }
-                }
-            }
-        }
-    }
-
-    suspend fun getAccountById(id: Long): Account? = withContext(Dispatchers.IO) {
-        transaction {
-            Accounts.selectAll()
-                .where { Accounts.id eq id }
-                .map { it.toAccount() }
-                .singleOrNull()
-        }
-    }
-
-    suspend fun createAccount(account: Account): Long = withContext(Dispatchers.IO) {
-        transaction {
-            Accounts.insert {
-                it[name] = account.name
-                it[balance] = account.balance
-                it[accountType] = account.accountType.name
-                it[currencyCode] = account.currencyCode
-                it[isActive] = account.isActive
-                it[displayOrder] = account.displayOrder
-                it[color] = account.color
-                it[iconName] = account.iconName
-                it[createdAt] = account.createdAt
-                it[initialCapital] = account.initialCapital
-                it[taxRate] = account.taxRate
-            } get Accounts.id
-        }.also { refresh() }
-    }
-
-    suspend fun updateAccount(account: Account) = withContext(Dispatchers.IO) {
-        transaction {
-            Accounts.update({ Accounts.id eq account.id }) {
-                it[name] = account.name
-                it[balance] = account.balance
-                it[accountType] = account.accountType.name
-                it[currencyCode] = account.currencyCode
-                it[isActive] = account.isActive
-                it[displayOrder] = account.displayOrder
-                it[color] = account.color
-                it[iconName] = account.iconName
-                it[initialCapital] = account.initialCapital
-                it[taxRate] = account.taxRate
-            }
-        }
+        val orderA = all.find { it.id == idA }?.displayOrder ?: return
+        val orderB = all.find { it.id == idB }?.displayOrder ?: return
+        db.from("accounts").update({ set("display_order", orderB) }) { filter { eq("id", idA) } }
+        db.from("accounts").update({ set("display_order", orderA) }) { filter { eq("id", idB) } }
         refresh()
     }
 
-    suspend fun updateBalance(accountId: Long, amount: BigDecimal) = withContext(Dispatchers.IO) {
-        // Atomic UPDATE balance = balance + ? to avoid race conditions on concurrent transfers
-        transaction {
-            exec(
-                "UPDATE accounts SET balance = balance + ? WHERE id = ?",
-                listOf(
-                    org.jetbrains.exposed.sql.DecimalColumnType(15, 2) to amount,
-                    org.jetbrains.exposed.sql.LongColumnType() to accountId
-                )
-            )
-        }
-        refresh()
+    fun getTotalBalance(): Flow<BigDecimal> = _refreshTrigger.map {
+        db.from("accounts").select { filter { eq("is_active", true) } }
+            .decodeList<AccountDto>()
+            .fold(BigDecimal.ZERO) { acc, dto -> acc.add(dto.balance) }
     }
 
-    /**
-     * Soft-delete: marks account as inactive instead of removing the row.
-     * Preserves linked transactions and lets the user restore the account later.
-     */
-    suspend fun deleteAccount(accountId: Long) = withContext(Dispatchers.IO) {
-        transaction {
-            Accounts.update({ Accounts.id eq accountId }) {
-                it[isActive] = false
-            }
-        }
-        refresh()
-    }
-
-    /** Hard-delete reserved for cleanup — only call when no transactions reference it. */
-    suspend fun hardDeleteAccount(accountId: Long) = withContext(Dispatchers.IO) {
-        transaction {
-            Accounts.deleteWhere { id eq accountId }
-        }
-        refresh()
-    }
-
-    /** Restore a soft-deleted account. */
-    suspend fun restoreAccount(accountId: Long) = withContext(Dispatchers.IO) {
-        transaction {
-            Accounts.update({ Accounts.id eq accountId }) {
-                it[isActive] = true
-            }
-        }
-        refresh()
-    }
-
-    /**
-     * Swap displayOrder between two accounts. First normalizes all accounts to
-     * have unique sequential orders (handles legacy data where every row has 0).
-     */
-    suspend fun swapDisplayOrder(idA: Long, idB: Long) = withContext(Dispatchers.IO) {
-        transaction {
-            // Step 1: normalize — assign sequential orders if duplicates exist
-            val all = Accounts.selectAll()
-                .orderBy(Accounts.displayOrder, SortOrder.ASC)
-                .orderBy(Accounts.id, SortOrder.ASC)
-                .map { it[Accounts.id] to it[Accounts.displayOrder] }
-
-            val orders = all.map { it.second }.toSet()
-            if (orders.size < all.size) {
-                // Duplicates exist — renumber everyone
-                all.forEachIndexed { idx, (id, _) ->
-                    Accounts.update({ Accounts.id eq id }) { it[displayOrder] = idx }
-                }
-            }
-
-            // Step 2: swap
-            val orderA = Accounts.selectAll().where { Accounts.id eq idA }
-                .map { it[Accounts.displayOrder] }.singleOrNull() ?: return@transaction
-            val orderB = Accounts.selectAll().where { Accounts.id eq idB }
-                .map { it[Accounts.displayOrder] }.singleOrNull() ?: return@transaction
-            Accounts.update({ Accounts.id eq idA }) { it[displayOrder] = orderB }
-            Accounts.update({ Accounts.id eq idB }) { it[displayOrder] = orderA }
-        }
-        refresh()
-    }
-
-    fun getTotalBalance(): Flow<BigDecimal> {
-        return _refreshTrigger.map {
-            withContext(Dispatchers.IO) {
-                transaction {
-                    Accounts.selectAll()
-                        .where { Accounts.isActive eq true }
-                        .map { it[Accounts.balance] }
-                        .fold(BigDecimal.ZERO) { acc, balance -> acc.add(balance) }
-                }
-            }
-        }
-    }
-
+    /** Transfert atomique entre deux comptes (débit + crédit + 2 transactions, RPC serveur). */
     suspend fun transferBetweenAccounts(
         fromId: Long,
         toId: Long,
         amount: BigDecimal,
         notes: String? = null
-    ) = withContext(Dispatchers.IO) {
-        transaction {
-            // Atomic balance updates — avoids race condition with concurrent transfers
-            exec(
-                "UPDATE accounts SET balance = balance - ? WHERE id = ?",
-                listOf(
-                    org.jetbrains.exposed.sql.DecimalColumnType(15, 2) to amount,
-                    org.jetbrains.exposed.sql.LongColumnType() to fromId
-                )
-            )
-            exec(
-                "UPDATE accounts SET balance = balance + ? WHERE id = ?",
-                listOf(
-                    org.jetbrains.exposed.sql.DecimalColumnType(15, 2) to amount,
-                    org.jetbrains.exposed.sql.LongColumnType() to toId
-                )
-            )
-
-            val now = LocalDateTime.now()
-
-            // Create transfer-out transaction
-            Transactions.insert {
-                it[accountId] = fromId
-                it[title] = "Transfert sortant"
-                it[Transactions.amount] = amount
-                it[transactionType] = TransactionType.TRANSFER.name
-                it[date] = now
-                it[Transactions.notes] = notes
-                it[createdAt] = now
-            }
-
-            // Create transfer-in transaction
-            Transactions.insert {
-                it[accountId] = toId
-                it[title] = "Transfert entrant"
-                it[Transactions.amount] = amount
-                it[transactionType] = TransactionType.TRANSFER.name
-                it[date] = now
-                it[Transactions.notes] = notes
-                it[createdAt] = now
-            }
-        }
+    ) {
+        db.postgrest.rpc("transfer_between_accounts", TransferParams(fromId, toId, amount, notes))
         refresh()
     }
 
-    private fun ResultRow.toAccount(): Account {
-        return Account(
-            id = this[Accounts.id],
-            name = this[Accounts.name],
-            balance = this[Accounts.balance],
-            accountType = AccountType.valueOf(this[Accounts.accountType]),
-            currencyCode = this[Accounts.currencyCode],
-            isActive = this[Accounts.isActive],
-            displayOrder = this[Accounts.displayOrder],
-            color = this[Accounts.color],
-            iconName = this[Accounts.iconName],
-            createdAt = this[Accounts.createdAt],
-            initialCapital = this[Accounts.initialCapital],
-            taxRate = this[Accounts.taxRate]
-        )
-    }
+    // ===== Mappers =====
+
+    private fun AccountDto.toDomain() = Account(
+        id = id ?: 0,
+        name = name,
+        balance = balance,
+        accountType = AccountType.valueOf(accountType),
+        currencyCode = currencyCode,
+        isActive = isActive,
+        displayOrder = displayOrder,
+        color = color,
+        iconName = iconName,
+        createdAt = DtoDates.parseDateTime(createdAt) ?: LocalDateTime.now(),
+        initialCapital = initialCapital,
+        taxRate = taxRate
+    )
+
+    private fun Account.toInsertDto() = AccountDto(
+        name = name,
+        balance = balance,
+        accountType = accountType.name,
+        currencyCode = currencyCode,
+        isActive = isActive,
+        displayOrder = displayOrder,
+        color = color,
+        iconName = iconName,
+        initialCapital = initialCapital,
+        taxRate = taxRate
+    )
 }

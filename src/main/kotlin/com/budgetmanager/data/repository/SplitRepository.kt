@@ -1,58 +1,48 @@
 package com.budgetmanager.data.repository
 
-import com.budgetmanager.data.database.Categories
-import com.budgetmanager.data.database.TransactionSplits
+import com.budgetmanager.data.remote.SupabaseClientProvider
+import com.budgetmanager.data.remote.dto.TransactionSplitDto
 import com.budgetmanager.domain.model.TransactionSplit
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import org.jetbrains.exposed.sql.JoinType
-import org.jetbrains.exposed.sql.ResultRow
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
-import org.jetbrains.exposed.sql.deleteWhere
-import org.jetbrains.exposed.sql.insert
-import org.jetbrains.exposed.sql.selectAll
-import org.jetbrains.exposed.sql.transactions.transaction
+import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.postgrest.query.Columns
 
-class SplitRepository {
+/** Repository Ventilations (splits) — backend Supabase (Postgrest). */
+class SplitRepository(private val provider: SupabaseClientProvider) {
 
-    suspend fun getSplitsForTransaction(transactionId: Long): List<TransactionSplit> = withContext(Dispatchers.IO) {
-        transaction {
-            TransactionSplits.join(Categories, JoinType.LEFT, TransactionSplits.categoryId, Categories.id)
-                .selectAll()
-                .where { TransactionSplits.transactionId eq transactionId }
-                .map { it.toSplit() }
-        }
-    }
+    private val db get() = provider.client
+    private val cols = Columns.raw("*, category:categories(name)")
 
-    suspend fun setSplits(transactionId: Long, splits: List<TransactionSplit>) = withContext(Dispatchers.IO) {
-        transaction {
-            // Replace strategy: delete all existing then insert new ones
-            TransactionSplits.deleteWhere { TransactionSplits.transactionId eq transactionId }
-            for (s in splits) {
-                TransactionSplits.insert {
-                    it[TransactionSplits.transactionId] = transactionId
-                    it[TransactionSplits.categoryId] = s.categoryId
-                    it[TransactionSplits.amount] = s.amount
-                    it[TransactionSplits.notes] = s.notes
-                }
+    suspend fun getSplitsForTransaction(transactionId: Long): List<TransactionSplit> =
+        db.from("transaction_splits").select(cols) {
+            filter { eq("transaction_id", transactionId) }
+        }.decodeList<TransactionSplitDto>().map { it.toDomain() }
+
+    /** Remplace toutes les ventilations d'une transaction. */
+    suspend fun setSplits(transactionId: Long, splits: List<TransactionSplit>) {
+        db.from("transaction_splits").delete { filter { eq("transaction_id", transactionId) } }
+        if (splits.isNotEmpty()) {
+            val dtos = splits.map {
+                TransactionSplitDto(
+                    transactionId = transactionId,
+                    categoryId = it.categoryId,
+                    amount = it.amount,
+                    notes = it.notes
+                )
             }
+            db.from("transaction_splits").insert(dtos)
         }
     }
 
-    suspend fun deleteSplitsForTransaction(transactionId: Long) = withContext(Dispatchers.IO) {
-        transaction {
-            TransactionSplits.deleteWhere { TransactionSplits.transactionId eq transactionId }
-        }
+    suspend fun deleteSplitsForTransaction(transactionId: Long) {
+        db.from("transaction_splits").delete { filter { eq("transaction_id", transactionId) } }
     }
 
-    private fun ResultRow.toSplit(): TransactionSplit {
-        return TransactionSplit(
-            id = this[TransactionSplits.id],
-            transactionId = this[TransactionSplits.transactionId],
-            categoryId = this[TransactionSplits.categoryId],
-            categoryName = this.getOrNull(Categories.name),
-            amount = this[TransactionSplits.amount],
-            notes = this[TransactionSplits.notes]
-        )
-    }
+    private fun TransactionSplitDto.toDomain() = TransactionSplit(
+        id = id ?: 0,
+        transactionId = transactionId,
+        categoryId = categoryId,
+        categoryName = category?.name,
+        amount = amount,
+        notes = notes
+    )
 }

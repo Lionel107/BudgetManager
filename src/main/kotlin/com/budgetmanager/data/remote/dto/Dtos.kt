@@ -153,6 +153,7 @@ data class ChallengeDto(
     @SerialName("start_date") val startDate: String,
     @SerialName("end_date") val endDate: String,
     @SerialName("is_completed") val isCompleted: Boolean = false,
+    @SerialName("created_at") val createdAt: String? = null,
     @SerialName("category") val category: CategoryRef? = null
 )
 
