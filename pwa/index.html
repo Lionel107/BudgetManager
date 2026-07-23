@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#e0e5ec" />
+  <title>Budget Manager</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icon.svg" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Budget" />
+  <style>
+    :root {
+      --bg: #e0e5ec; --elevated: #e8edf4; --depressed: #d1d9e6;
+      --primary: #6c63ff; --text: #2d3436; --text2: #636e72; --text3: #b2bec3;
+      --income: #00b894; --expense: #e17055; --alert: #d63031;
+      --light: #ffffff; --dark: #a3b1c6;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg); color: var(--text);
+      min-height: 100vh; padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+    }
+    .wrap { max-width: 480px; margin: 0 auto; padding: 16px; }
+    h1 { font-size: 1.4rem; color: var(--primary); }
+    .muted { color: var(--text2); font-size: .9rem; }
+    .card {
+      background: var(--elevated); border-radius: 16px; padding: 18px; margin: 14px 0;
+      box-shadow: 6px 6px 12px var(--dark), -6px -6px 12px var(--light);
+    }
+    label { display: block; font-size: .8rem; color: var(--text2); margin: 12px 0 6px; }
+    input, select {
+      width: 100%; font-size: 1rem; color: var(--text); border: none; outline: none;
+      background: var(--depressed); border-radius: 12px; padding: 14px;
+      box-shadow: inset 3px 3px 6px var(--dark), inset -3px -3px 6px var(--light);
+    }
+    button {
+      width: 100%; font-size: 1rem; font-weight: 600; color: #fff; cursor: pointer;
+      background: var(--primary); border: none; border-radius: 12px; padding: 15px; margin-top: 18px;
+      box-shadow: 4px 4px 8px var(--dark), -4px -4px 8px var(--light);
+    }
+    button:active { transform: translateY(1px); }
+    button.secondary { background: var(--depressed); color: var(--text); }
+    button:disabled { opacity: .6; }
+    .seg { display: flex; gap: 8px; }
+    .seg button { margin-top: 0; background: var(--depressed); color: var(--text2); font-weight: 500; }
+    .seg button.on-expense { background: var(--expense); color: #fff; }
+    .seg button.on-income { background: var(--income); color: #fff; }
+    .row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+    .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+    .link { color: var(--primary); text-align: center; margin-top: 16px; font-size: .9rem; cursor: pointer; }
+    .msg { text-align: center; font-size: .85rem; margin-top: 12px; }
+    .msg.err { color: var(--alert); }
+    .msg.ok { color: var(--income); }
+    .txn { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--depressed); }
+    .txn:last-child { border-bottom: none; }
+    .amt.exp { color: var(--expense); font-weight: 600; }
+    .amt.inc { color: var(--income); font-weight: 600; }
+    .hidden { display: none !important; }
+    .logout { width: auto; margin: 0; padding: 8px 14px; font-size: .8rem; background: var(--depressed); color: var(--text2); box-shadow: none; }
+    .spin { text-align: center; padding: 40px; color: var(--text2); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <!-- Chargement -->
+    <div id="loading" class="spin">Chargement…</div>
+
+    <!-- Connexion -->
+    <div id="auth" class="hidden">
+      <h1>Budget Manager</h1>
+      <p class="muted" id="auth-sub">Connexion à ton compte</p>
+      <div class="card">
+        <label for="email">E-mail</label>
+        <input id="email" type="email" inputmode="email" autocomplete="email" placeholder="toi@exemple.fr" />
+        <label for="password">Mot de passe</label>
+        <input id="password" type="password" autocomplete="current-password" placeholder="••••••" />
+        <button id="auth-btn">Se connecter</button>
+        <div id="auth-msg" class="msg"></div>
+        <div class="link" id="auth-toggle">Pas encore de compte ? En créer un</div>
+      </div>
+    </div>
+
+    <!-- Application -->
+    <div id="app" class="hidden">
+      <div class="topbar">
+        <h1>Ajouter</h1>
+        <button class="logout" id="logout">Déconnexion</button>
+      </div>
+      <p class="muted" id="user-email"></p>
+
+      <div class="card">
+        <div class="seg">
+          <button type="button" id="type-expense" class="on-expense">Dépense</button>
+          <button type="button" id="type-income">Revenu</button>
+        </div>
+
+        <label for="amount">Montant (€)</label>
+        <input id="amount" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0,00" />
+
+        <label for="title">Libellé</label>
+        <input id="title" type="text" placeholder="Ex. Courses" />
+
+        <label for="account">Compte</label>
+        <select id="account"></select>
+
+        <label for="category">Catégorie</label>
+        <select id="category"></select>
+
+        <label for="date">Date</label>
+        <input id="date" type="date" />
+
+        <button id="save">Enregistrer</button>
+        <div id="save-msg" class="msg"></div>
+      </div>
+
+      <div class="card">
+        <div class="row"><strong>Dernières transactions</strong></div>
+        <div id="recent"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="config.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
