@@ -477,6 +477,33 @@ fun SettingsScreen(navigationState: NavigationState) {
                 }
             }
 
+            Spacer(Modifier.height(12.dp))
+
+            // Déconnexion
+            val logoutScope = rememberCoroutineScope()
+            NeumorphicCard(modifier = Modifier.fillMaxWidth(), elevation = 6.dp) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Logout, null, tint = ExpenseColor, modifier = Modifier.size(24.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Compte", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text("Se déconnecter de ce compte", style = MaterialTheme.typography.bodySmall, color = NeumorphicTextTertiary)
+                    }
+                    NeumorphicButton(
+                        text = "Se déconnecter",
+                        icon = Icons.Filled.Logout,
+                        isPrimary = false,
+                        onClick = {
+                            logoutScope.launch {
+                                runCatching {
+                                    getKoin().get<com.budgetmanager.data.remote.AuthRepository>().signOut()
+                                }
+                            }
+                        }
+                    )
+                }
+            }
+
             Spacer(Modifier.height(24.dp))
 
             // Save button
