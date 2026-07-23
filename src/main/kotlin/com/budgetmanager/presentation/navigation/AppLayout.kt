@@ -43,6 +43,7 @@ import com.budgetmanager.presentation.screens.templates.TemplateScreen
 import com.budgetmanager.presentation.screens.challenges.ChallengesScreen
 import com.budgetmanager.presentation.screens.badges.BadgesScreen
 import com.budgetmanager.presentation.screens.rates.ExchangeRatesScreen
+import com.budgetmanager.presentation.screens.advisor.AdvisorScreen
 
 @Composable
 fun AppLayout(navigationState: NavigationState) {
@@ -111,6 +112,7 @@ fun AppLayout(navigationState: NavigationState) {
                     Screen.CHALLENGES -> ChallengesScreen(navigationState)
                     Screen.BADGES -> BadgesScreen(navigationState)
                     Screen.EXCHANGE_RATES -> ExchangeRatesScreen(navigationState)
+                    Screen.ADVISOR -> AdvisorScreen()
                     Screen.SETTINGS -> SettingsScreen(navigationState)
                 }
             }

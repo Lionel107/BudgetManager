@@ -13,6 +13,7 @@ val appModule = module {
     // Supabase (backend synchro) — Phase 2
     single { com.budgetmanager.data.remote.SupabaseClientProvider() }
     single { com.budgetmanager.data.remote.AuthRepository(get()) }
+    single { com.budgetmanager.data.repository.AdvisorRepository(get()) }
 
     // Database
     single {

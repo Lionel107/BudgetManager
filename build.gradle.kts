@@ -40,6 +40,7 @@ dependencies {
     implementation(platform("io.github.jan-tennert.supabase:bom:2.5.4"))
     implementation("io.github.jan-tennert.supabase:postgrest-kt")
     implementation("io.github.jan-tennert.supabase:gotrue-kt")
+    implementation("io.github.jan-tennert.supabase:functions-kt")
     // Moteur HTTP Ktor requis par supabase-kt
     implementation("io.ktor:ktor-client-cio:2.3.12")
     // Sérialisation JSON (DTO <-> API REST Supabase)
