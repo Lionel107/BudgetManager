@@ -54,7 +54,10 @@ compose.desktop {
         mainClass = "com.budgetmanager.MainKt"
 
         jvmArgs += listOf(
-            "-Dfile.encoding=UTF-8"
+            "-Dfile.encoding=UTF-8",
+            // Rendu OpenGL au lieu de Direct3D : évite les crashs Skiko
+            // "Failed Direct3D call 0x887a0005" (DXGI device removed) sur Windows.
+            "-Dskiko.renderApi=OPENGL"
         )
 
         nativeDistributions {
