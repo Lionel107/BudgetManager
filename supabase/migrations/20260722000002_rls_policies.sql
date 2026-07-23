@@ -14,6 +14,19 @@
 --    Ne jamais l'exposer côté client. Le client utilise uniquement la anon key.
 -- ============================================================================
 
+-- 0. Nettoyage des politiques existantes (ré-exécutable)
+drop policy if exists owner_all on public.accounts;
+drop policy if exists owner_all on public.categories;
+drop policy if exists owner_all on public.transactions;
+drop policy if exists owner_all on public.recurring_transactions;
+drop policy if exists owner_all on public.templates;
+drop policy if exists owner_all on public.tags;
+drop policy if exists owner_all on public.transaction_tags;
+drop policy if exists owner_all on public.transaction_splits;
+drop policy if exists owner_all on public.exchange_rates;
+drop policy if exists owner_all on public.challenges;
+drop policy if exists owner_all on public.budgets;
+
 -- 1. Activer la RLS sur toutes les tables
 alter table public.accounts               enable row level security;
 alter table public.categories             enable row level security;

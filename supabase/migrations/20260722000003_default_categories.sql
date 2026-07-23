@@ -32,7 +32,8 @@ begin
 end;
 $$;
 
--- Déclencheur sur la création d'un compte utilisateur Supabase
+-- Déclencheur sur la création d'un compte utilisateur Supabase (ré-exécutable)
+drop trigger if exists trg_seed_default_categories on auth.users;
 create trigger trg_seed_default_categories
     after insert on auth.users
     for each row execute function public.seed_default_categories();
