@@ -95,6 +95,11 @@ async function loadAppData() {
     supabase.from("categories").select("id,name,category_type").eq("is_active", true).order("display_order"),
   ]);
 
+  // Diagnostics (visibles dans la console F12)
+  if (acc.error) console.error("[accounts] erreur:", acc.error);
+  if (cat.error) console.error("[categories] erreur:", cat.error);
+  console.log("[accounts] chargés:", acc.data?.length ?? 0, "| [categories] chargées:", cat.data?.length ?? 0);
+
   const accSel = $("account");
   accSel.innerHTML = (acc.data || [])
     .map((a) => `<option value="${a.id}">${escapeHtml(a.name)}</option>`)

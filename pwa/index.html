@@ -35,6 +35,15 @@
       background: var(--depressed); border-radius: 12px; padding: 14px;
       box-shadow: inset 3px 3px 6px var(--dark), inset -3px -3px 6px var(--light);
     }
+    /* Menus déroulants : on retire la flèche native et on met un chevron neumorphique */
+    select {
+      appearance: none; -webkit-appearance: none; -moz-appearance: none;
+      padding-right: 42px; cursor: pointer;
+      background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="%236c63ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>');
+      background-repeat: no-repeat; background-position: right 16px center;
+    }
+    /* iOS : le fond des options suit le thème */
+    select option { background: var(--elevated); color: var(--text); }
     button {
       width: 100%; font-size: 1rem; font-weight: 600; color: #fff; cursor: pointer;
       background: var(--primary); border: none; border-radius: 12px; padding: 15px; margin-top: 18px;

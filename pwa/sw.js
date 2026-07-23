@@ -1,6 +1,6 @@
 // Service worker minimal : met en cache la coquille de l'app pour un chargement
 // hors-ligne. Les données restent en réseau (online-first) — non mises en cache.
-const CACHE = "budgetmanager-pwa-v1";
+const CACHE = "budgetmanager-pwa-v2";
 const SHELL = ["./", "./index.html", "./app.js", "./config.js", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", (e) => {
@@ -18,7 +18,14 @@ self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   // On ne gère que la coquille locale ; tout le reste (API Supabase, CDN) passe au réseau.
   if (e.request.method !== "GET" || url.origin !== self.location.origin) return;
+  // Réseau d'abord (toujours la dernière version), cache en repli hors-ligne.
   e.respondWith(
-    caches.match(e.request).then((hit) => hit || fetch(e.request))
+    fetch(e.request)
+      .then((resp) => {
+        const copy = resp.clone();
+        caches.open(CACHE).then((c) => c.put(e.request, copy));
+        return resp;
+      })
+      .catch(() => caches.match(e.request))
   );
 });
