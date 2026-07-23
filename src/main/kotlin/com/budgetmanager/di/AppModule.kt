@@ -12,6 +12,7 @@ import org.koin.dsl.module
 val appModule = module {
     // Supabase (backend synchro) — Phase 2
     single { com.budgetmanager.data.remote.SupabaseClientProvider() }
+    single { com.budgetmanager.data.remote.AuthRepository(get()) }
 
     // Database
     single {

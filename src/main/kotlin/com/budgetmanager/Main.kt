@@ -143,8 +143,11 @@ fun main() {
             )
         ) {
             BudgetManagerTheme {
-                val navigationState = remember { NavigationState() }
-                AppLayout(navigationState)
+                val authRepo = remember { getKoin().get<com.budgetmanager.data.remote.AuthRepository>() }
+                com.budgetmanager.presentation.screens.auth.AuthGate(authRepo) {
+                    val navigationState = remember { NavigationState() }
+                    AppLayout(navigationState)
+                }
             }
         }
     }

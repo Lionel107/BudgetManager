@@ -3,7 +3,6 @@ package com.budgetmanager.data.remote
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.gotrue.Auth
-import io.github.jan.supabase.gotrue.FlowType
 import io.github.jan.supabase.postgrest.Postgrest
 
 /**
@@ -22,9 +21,9 @@ class SupabaseClientProvider {
         supabaseKey = SupabaseConfig.anonKey
     ) {
         install(Auth) {
-            // PKCE : flux d'auth recommandé pour les clients publics (desktop/mobile)
-            flowType = FlowType.PKCE
-            // La session (tokens) est conservée et rafraîchie automatiquement
+            // Session persistée sur disque (~/.budgetmanager/session.json)
+            sessionManager = FileSessionManager()
+            // La session (tokens) est chargée au démarrage et rafraîchie automatiquement
             alwaysAutoRefresh = true
             autoLoadFromStorage = true
         }

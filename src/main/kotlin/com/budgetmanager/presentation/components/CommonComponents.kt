@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.input.pointer.PointerIcon
@@ -608,6 +609,7 @@ fun NeumorphicTextField(
     prefix: String? = null,
     leadingIcon: @Composable (() -> Unit)? = null,
     textStyle: TextStyle = TextStyle.Default,
+    visualTransformation: VisualTransformation = VisualTransformation.None,
     enabled: Boolean = true
 ) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -653,6 +655,7 @@ fun NeumorphicTextField(
                         MaterialTheme.typography.bodyLarge.copy(color = NeumorphicTextPrimary)
                     else textStyle.copy(color = if (textStyle.color == Color.Unspecified) NeumorphicTextPrimary else textStyle.color),
                     cursorBrush = SolidColor(NeumorphicPrimary),
+                    visualTransformation = visualTransformation,
                     modifier = Modifier.weight(1f),
                     decorationBox = { innerTextField ->
                         Box {
