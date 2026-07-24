@@ -652,10 +652,41 @@ private fun BudgetAdviceTab(ui: BudgetUiState) {
     }
 
     fun refreshAi() {
-        // Ancien moteur Gemini retiré : l'analyse IA (12 mois, saisonnalité, planificateur)
-        // est désormais centralisée dans l'onglet « Conseiller IA » (une seule clé, pas de
-        // double consommation de quota, plus de conseils mois-par-mois contradictoires).
-        aiError = "Les conseils IA sont désormais dans l'onglet « Conseiller IA » (barre latérale)."
+        if (isLoadingAi) return
+        scope.launch {
+            isLoadingAi = true
+            aiError = null
+            try {
+                val koin = org.koin.core.context.GlobalContext.get()
+                val appPrefs = koin.get<com.budgetmanager.data.preferences.AppPreferences>()
+                val key = appPrefs.geminiApiKey
+                if (key.isBlank()) {
+                    aiError = "Ajoute ta cle API Gemini dans les Parametres."
+                    isLoadingAi = false
+                    return@launch
+                }
+                val result = withContext(Dispatchers.IO) {
+                    com.budgetmanager.util.GeminiAdviceService().fetchAdvice(
+                        apiKey = key,
+                        accounts = ui.allAccounts,
+                        transactions = ui.allTransactions,
+                        budgets = ui.budgets,
+                        savingsGoal = java.math.BigDecimal(ui.savingsGoal.toString())
+                    )
+                }
+                if (result.isEmpty()) {
+                    aiError = "Pas de reponse exploitable de Gemini. Cle valide ? Connexion OK ?"
+                } else {
+                    aiAdvices = result
+                    appPrefs.cachedGeminiAdvice = serializeAdvice(result)
+                    appPrefs.cachedGeminiAdviceYearMonth = java.time.YearMonth.now().toString()
+                }
+            } catch (e: Exception) {
+                aiError = "Erreur: ${e.message}"
+            } finally {
+                isLoadingAi = false
+            }
+        }
     }
 
     Column(

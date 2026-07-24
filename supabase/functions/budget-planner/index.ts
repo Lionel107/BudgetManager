@@ -266,30 +266,35 @@ Règles :
 Réponds UNIQUEMENT en JSON valide :
 {"summary": "2-3 phrases expliquant le plan et l'épargne dégagée", "plan": [{"category": "<nom de catégorie, existante ou nouvelle>", "monthlyAmount": <nombre>, "rationale": "courte justification"}]}`;
 
-  const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=" + key;
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.6, responseMimeType: "application/json" },
-    }),
+  // Cascade de modèles : bascule au suivant si l'un est en quota (429) ou indisponible (503).
+  const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+  const reqBody = JSON.stringify({
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { temperature: 0.6, responseMimeType: "application/json" },
   });
-  if (!resp.ok) {
+  let lastErr = "";
+  for (const model of models) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+    const resp = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: reqBody });
+    if (resp.ok) {
+      const data = await resp.json();
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+      const parsed = JSON.parse(text);
+      return {
+        summary: String(parsed.summary ?? ""),
+        plan: Array.isArray(parsed.plan)
+          ? parsed.plan.map((p: any) => ({
+              category: String(p.category ?? ""),
+              monthlyAmount: Number(p.monthlyAmount) || 0,
+              rationale: String(p.rationale ?? ""),
+            }))
+          : [],
+      };
+    }
     const errBody = await resp.text().catch(() => "");
-    throw new Error("Gemini HTTP " + resp.status + " — " + errBody.slice(0, 400));
+    lastErr = `HTTP ${resp.status} (${model}) ${errBody.slice(0, 120)}`;
+    if (resp.status !== 429 && resp.status !== 503) throw new Error("Gemini " + lastErr);
+    // 429/503 → on tente le modèle suivant
   }
-  const data = await resp.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-  const parsed = JSON.parse(text);
-  return {
-    summary: String(parsed.summary ?? ""),
-    plan: Array.isArray(parsed.plan)
-      ? parsed.plan.map((p: any) => ({
-          category: String(p.category ?? ""),
-          monthlyAmount: Number(p.monthlyAmount) || 0,
-          rationale: String(p.rationale ?? ""),
-        }))
-      : [],
-  };
+  throw new Error("Gemini : tous les modèles indisponibles — " + lastErr);
 }

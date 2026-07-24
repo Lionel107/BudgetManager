@@ -177,23 +177,27 @@ Rédige un accompagnement PERSONNALISÉ en français. Insiste sur la SAISONNALIT
 Réponds UNIQUEMENT en JSON valide, sans texte autour, au format :
 {"summary": "2-3 phrases de synthèse chaleureuse et utile", "tips": ["conseil 1", "conseil 2", "conseil 3", "conseil 4"]}`;
 
-  const url =
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=" +
-    key;
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.7, responseMimeType: "application/json" },
-    }),
+  // Cascade de modèles : bascule au suivant si l'un est en quota (429) ou indisponible (503).
+  const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+  const reqBody = JSON.stringify({
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { temperature: 0.7, responseMimeType: "application/json" },
   });
-  if (!resp.ok) throw new Error("Gemini HTTP " + resp.status);
-  const data = await resp.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-  const parsed = JSON.parse(text);
-  return {
-    summary: String(parsed.summary ?? ""),
-    tips: Array.isArray(parsed.tips) ? parsed.tips.map((t: unknown) => String(t)) : [],
-  };
+  let lastErr = "";
+  for (const model of models) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+    const resp = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: reqBody });
+    if (resp.ok) {
+      const data = await resp.json();
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+      const parsed = JSON.parse(text);
+      return {
+        summary: String(parsed.summary ?? ""),
+        tips: Array.isArray(parsed.tips) ? parsed.tips.map((t: unknown) => String(t)) : [],
+      };
+    }
+    lastErr = `HTTP ${resp.status} (${model})`;
+    if (resp.status !== 429 && resp.status !== 503) throw new Error("Gemini " + lastErr);
+  }
+  throw new Error("Gemini : tous les modèles indisponibles — " + lastErr);
 }
