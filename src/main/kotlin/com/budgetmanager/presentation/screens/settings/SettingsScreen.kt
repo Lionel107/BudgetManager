@@ -460,6 +460,35 @@ fun SettingsScreen(navigationState: NavigationState) {
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
+                Spacer(Modifier.height(10.dp))
+                val keyScope = rememberCoroutineScope()
+                var keyTesting by remember { mutableStateOf(false) }
+                var keyTestResult by remember { mutableStateOf<String?>(null) }
+                NeumorphicButton(
+                    text = if (keyTesting) "Test en cours..." else "Tester la cle",
+                    icon = Icons.Filled.Check,
+                    isPrimary = false,
+                    enabled = !keyTesting,
+                    onClick = {
+                        keyTesting = true; keyTestResult = null
+                        keyScope.launch {
+                            keyTestResult = com.budgetmanager.data.remote.GeminiKeyTester.test(ui.geminiApiKey)
+                            keyTesting = false
+                        }
+                    }
+                )
+                keyTestResult?.let {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = when {
+                            it.startsWith("✅") -> IncomeColor
+                            it.startsWith("⚠") -> NeumorphicBudgetWarning
+                            else -> ExpenseColor
+                        }
+                    )
+                }
             }
 
             Spacer(Modifier.height(16.dp))
