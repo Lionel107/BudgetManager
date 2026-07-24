@@ -1,0 +1,194 @@
+// ============================================================================
+// Edge Function : budget-planner (Phase 5 - D)
+// Propose un budget mensuel par catégorie à partir de : historique 12 mois,
+// caractère essentiel/superflu des catégories, objectifs, budgets actuels.
+// Prend en compte les REMARQUES de l'utilisateur pour réadapter un plan précédent.
+//
+// Clé Gemini = par utilisateur (corps de requête), jamais stockée. Sans clé :
+// plan déterministe basé sur les moyennes (dégradé gracieux).
+// Corps : { geminiKey?, remarks?, currentPlan?: [{category, monthlyAmount}] }
+// Réponse : { monthlyIncome, summary, plan: [{category, monthlyAmount, rationale, essential}] }
+// ============================================================================
+
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+function round2(n: number): number { return Math.round(n * 100) / 100; }
+
+function monthKeysWindow(now: Date): string[] {
+  const keys: string[] = [];
+  for (let i = 11; i >= 0; i--) {
+    const dt = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+    keys.push(`${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}`);
+  }
+  return keys;
+}
+
+function median(arr: number[]): number {
+  if (arr.length === 0) return 0;
+  const s = [...arr].sort((a, b) => a - b);
+  const n = s.length;
+  return n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2;
+}
+
+Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  try {
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) return json({ error: "Non authentifié." }, 401);
+
+    let geminiKey: string | undefined;
+    let remarks: string | undefined;
+    let currentPlan: unknown;
+    try {
+      const body = await req.json();
+      geminiKey = body?.geminiKey;
+      remarks = body?.remarks;
+      currentPlan = body?.currentPlan;
+    } catch { /* pas de corps */ }
+
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_ANON_KEY")!,
+      { global: { headers: { Authorization: authHeader } } },
+    );
+
+    const now = new Date();
+    const monthKeys = monthKeysWindow(now);
+    const fromIso = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1)).toISOString();
+
+    const [txnRes, catRes, objRes, budRes] = await Promise.all([
+      supabase.from("transactions").select("amount, transaction_type, date, category:categories(name)").gte("date", fromIso),
+      supabase.from("categories").select("name, is_essential, category_type").eq("is_active", true).eq("category_type", "EXPENSE"),
+      supabase.from("objectives").select("title, type, target_amount, target_date, category:categories(name)").eq("is_active", true),
+      supabase.from("budgets").select("budget_limit, category:categories(name)"),
+    ]);
+
+    const txns = (txnRes.data ?? []) as any[];
+    if (txns.length === 0) return json({ error: "Pas assez de données pour proposer un budget." }, 422);
+
+    const essentialOf: Record<string, boolean> = {};
+    for (const c of (catRes.data ?? []) as any[]) essentialOf[c.name] = c.is_essential !== false;
+
+    const currentBudgetOf: Record<string, number> = {};
+    for (const b of (budRes.data ?? []) as any[]) {
+      if (b.category?.name) currentBudgetOf[b.category.name] = Number(b.budget_limit) || 0;
+    }
+
+    // Agrégation dépenses par catégorie/mois + revenu
+    let income = 0;
+    const perCat: Record<string, Record<string, number>> = {};
+    for (const t of txns) {
+      const amt = Number(t.amount) || 0;
+      if (t.transaction_type === "INCOME") { income += amt; continue; }
+      if (t.transaction_type !== "EXPENSE") continue;
+      const cat = t.category?.name ?? "Sans catégorie";
+      const mk = String(t.date).slice(0, 7);
+      perCat[cat] ??= {};
+      perCat[cat][mk] = (perCat[cat][mk] ?? 0) + amt;
+    }
+
+    const monthlyIncome = round2(income / 12);
+    const catContext = Object.entries(perCat).map(([name, byMonth]) => {
+      const values = monthKeys.map((k) => byMonth[k] ?? 0);
+      const total = values.reduce((a, b) => a + b, 0);
+      const med = median(values);
+      const spikes = values.filter((v) => (v - med) >= 200 && v >= med * 1.4).length;
+      const seasonal = total >= 150 && spikes >= 1 && spikes <= 4;
+      return {
+        category: name,
+        monthlyAverage: round2(total / 12),
+        essential: essentialOf[name] !== false,
+        seasonal,
+        currentBudget: currentBudgetOf[name] ?? null,
+      };
+    }).sort((a, b) => b.monthlyAverage - a.monthlyAverage);
+
+    const objectives = ((objRes.data ?? []) as any[]).map((o) => ({
+      title: o.title,
+      type: o.type,
+      targetAmount: Number(o.target_amount) || 0,
+      targetDate: o.target_date,
+      category: o.category?.name ?? null,
+    }));
+
+    // ---- Plan : Gemini si clé, sinon déterministe (moyennes) ----
+    let plan: { category: string; monthlyAmount: number; rationale: string; essential: boolean }[];
+    let summary: string;
+
+    if (geminiKey) {
+      const g = await askGeminiPlan(geminiKey, { monthlyIncome, categories: catContext, objectives, remarks, currentPlan });
+      summary = g.summary;
+      plan = g.plan.map((p) => ({ ...p, essential: essentialOf[p.category] !== false }));
+    } else {
+      plan = catContext.map((c) => ({
+        category: c.category,
+        monthlyAmount: c.monthlyAverage,
+        rationale: c.seasonal ? "Moyenne mensuelle (catégorie saisonnière → provision)" : "Basé sur ta moyenne des 12 mois",
+        essential: c.essential,
+      }));
+      summary = "Plan basé sur tes moyennes des 12 derniers mois. Ajoute ta clé Gemini (Réglages) pour un plan optimisé et des ajustements par remarques.";
+    }
+
+    return json({ monthlyIncome, summary, plan });
+  } catch (e) {
+    console.error(e);
+    return json({ error: String(e) }, 500);
+  }
+});
+
+async function askGeminiPlan(
+  key: string,
+  ctx: unknown,
+): Promise<{ summary: string; plan: { category: string; monthlyAmount: number; rationale: string }[] }> {
+  const prompt = `Tu es un planificateur budgétaire bienveillant et réaliste (particulier, France, euros).
+Contexte (chiffres déjà calculés sur 12 mois) :
+${JSON.stringify(ctx)}
+
+Règles :
+- Propose un budget MENSUEL par catégorie de dépense, réaliste et basé sur "monthlyAverage".
+- Priorise les catégories "essential:true" ; comprime plutôt les "essential:false" si besoin d'épargner.
+- Les catégories "seasonal:true" ne tombent que certains mois : budgète-les à leur moyenne mensuelle (provision) pour lisser sur l'année, sans t'alarmer d'un mois isolé.
+- Intègre les "objectives" : pour un objectif SAVINGS (épargner targetAmount d'ici targetDate), dégage la marge mensuelle nécessaire (revenu - dépenses). Pour SPENDING_LIMIT, respecte le plafond sur la catégorie visée.
+- La somme des budgets doit laisser une épargne cohérente vs monthlyIncome.
+- Si "remarks" est fourni, AJUSTE le "currentPlan" en tenant compte de la remarque.
+Réponds UNIQUEMENT en JSON valide :
+{"summary": "2-3 phrases expliquant le plan et l'épargne dégagée", "plan": [{"category": "<nom exact de la liste>", "monthlyAmount": <nombre>, "rationale": "courte justification"}]}`;
+
+  const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + key;
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.6, responseMimeType: "application/json" },
+    }),
+  });
+  if (!resp.ok) throw new Error("Gemini HTTP " + resp.status);
+  const data = await resp.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+  const parsed = JSON.parse(text);
+  return {
+    summary: String(parsed.summary ?? ""),
+    plan: Array.isArray(parsed.plan)
+      ? parsed.plan.map((p: any) => ({
+          category: String(p.category ?? ""),
+          monthlyAmount: Number(p.monthlyAmount) || 0,
+          rationale: String(p.rationale ?? ""),
+        }))
+      : [],
+  };
+}

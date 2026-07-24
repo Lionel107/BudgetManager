@@ -166,6 +166,10 @@ fun AdvisorScreen() {
                 }
             }
         }
+
+        Spacer(Modifier.height(14.dp))
+        BudgetPlannerSection()
+        Spacer(Modifier.height(24.dp))
     }
 }
 

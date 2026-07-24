@@ -15,6 +15,7 @@ val appModule = module {
     single { com.budgetmanager.data.remote.AuthRepository(get()) }
     single { com.budgetmanager.data.repository.AdvisorRepository(get(), get()) }
     single { com.budgetmanager.data.repository.ObjectiveRepository(get()) }
+    single { com.budgetmanager.data.repository.PlannerRepository(get(), get(), get(), get()) }
 
     // Database
     single {
