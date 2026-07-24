@@ -55,6 +55,7 @@ private val mainNavItems = listOf(
     SidebarItem(Screen.ACCOUNTS, "Comptes", Icons.Outlined.AccountBalance, Icons.Filled.AccountBalance),
     // --- Suivi & planification ---
     SidebarItem(Screen.BUDGETS, "Budgets", Icons.Outlined.Wallet, Icons.Filled.Wallet),
+    SidebarItem(Screen.OBJECTIVES, "Objectifs", Icons.Outlined.Flag, Icons.Filled.Flag),
     SidebarItem(Screen.RECURRING, "Récurrents", Icons.Outlined.Repeat, Icons.Filled.Repeat),
     SidebarItem(Screen.CATEGORIES, "Catégories", Icons.Outlined.Category, Icons.Filled.Category),
     SidebarItem(Screen.TEMPLATES, "Templates", Icons.Outlined.LibraryBooks, Icons.Filled.LibraryBooks),
@@ -70,7 +71,7 @@ private val mainNavItems = listOf(
 )
 
 /** Indices of the FIRST item of each logical group → render a separator before them. */
-private val groupBoundaries = setOf(3, 7, 11)
+private val groupBoundaries = setOf(3, 8, 12)
 
 private val bottomNavItem = SidebarItem(Screen.SETTINGS, "Paramètres", Icons.Outlined.Settings, Icons.Filled.Settings)
 
