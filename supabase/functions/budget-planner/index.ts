@@ -222,15 +222,22 @@ Deno.serve(async (req: Request) => {
         if (g.plan.length > 0) {
           summary = g.summary;
           plan = g.plan.map((p) => ({ ...p, essential: essentialOf[p.category] !== false }));
+        } else {
+          summary = (hasCurrent ? "Tes montants sont conservés. " : summary + " ") + "IA : réponse vide.";
         }
       } catch (e) {
         console.error("Gemini plan:", e);
-        const quota = String(e).includes("429");
+        const msg = String(e);
+        const quota = msg.includes("429");
         // IMPORTANT : en cas d'échec IA, on NE recalcule PAS (les montants ci-dessus,
-        // édités ou déterministes, sont conservés). On explique juste.
+        // édités ou déterministes, sont conservés). On explique + on montre la cause.
         summary = (hasCurrent ? "Tes montants sont conservés. " : summary + " ") +
-          (quota ? "IA en quota (réessaie dans ~1 min pour prendre en compte ta remarque)." : "IA indisponible pour l'instant.");
+          (quota
+            ? "IA en quota (429) : réessaie dans ~1 min."
+            : `IA indisponible : ${msg.slice(0, 140)}`);
       }
+    } else {
+      summary += " [DEBUG] Aucune clé Gemini reçue par la fonction — vérifie Réglages → Clé API.";
     }
 
     return json({ monthlyIncome, summary, plan });
