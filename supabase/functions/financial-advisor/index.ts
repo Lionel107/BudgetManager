@@ -178,7 +178,7 @@ Réponds UNIQUEMENT en JSON valide, sans texte autour, au format :
 {"summary": "2-3 phrases de synthèse chaleureuse et utile", "tips": ["conseil 1", "conseil 2", "conseil 3", "conseil 4"]}`;
 
   const url =
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" +
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=" +
     key;
   const resp = await fetch(url, {
     method: "POST",

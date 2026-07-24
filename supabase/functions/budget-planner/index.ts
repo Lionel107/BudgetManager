@@ -266,7 +266,7 @@ Règles :
 Réponds UNIQUEMENT en JSON valide :
 {"summary": "2-3 phrases expliquant le plan et l'épargne dégagée", "plan": [{"category": "<nom de catégorie, existante ou nouvelle>", "monthlyAmount": <nombre>, "rationale": "courte justification"}]}`;
 
-  const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + key;
+  const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=" + key;
   const resp = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
