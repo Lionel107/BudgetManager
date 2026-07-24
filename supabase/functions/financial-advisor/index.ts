@@ -2,12 +2,13 @@
 // Edge Function : financial-advisor
 // Analyse les 12 derniers mois de l'utilisateur (RLS appliquée via son JWT),
 // calcule des statistiques DÉTERMINISTES (saisonnalité + budget annuel lissé),
-// puis demande à Gemini un accompagnement rédigé. La clé Gemini reste côté
-// serveur (secret GEMINI_API_KEY) — jamais exposée au client.
+// puis demande à Gemini un accompagnement rédigé.
 //
-// Déploiement :
-//   supabase functions deploy financial-advisor
-//   supabase secrets set GEMINI_API_KEY=xxxxx
+// Clé Gemini = PAR UTILISATEUR : envoyée par le client dans le corps de la requête
+// ({ "geminiKey": "..." }), utilisée côté serveur pour l'appel, JAMAIS stockée
+// (ni base, ni secret, ni log). Sans clé, seule l'analyse chiffrée est renvoyée.
+//
+// Déploiement : supabase functions deploy financial-advisor  (aucun secret à définir)
 // ============================================================================
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -34,6 +35,13 @@ Deno.serve(async (req: Request) => {
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) return json({ error: "Non authentifié." }, 401);
+
+    // Clé Gemini de l'utilisateur, envoyée par le client (jamais stockée côté serveur).
+    let geminiKey: string | undefined;
+    try {
+      const body = await req.json();
+      geminiKey = body?.geminiKey;
+    } catch { /* pas de corps de requête */ }
 
     // Client Supabase agissant AU NOM de l'utilisateur (RLS appliquée)
     const supabase = createClient(
@@ -105,9 +113,9 @@ Deno.serve(async (req: Request) => {
       seasonal,
     };
 
-    // ---- Accompagnement rédigé par Gemini (dégradé gracieux si indispo) ----
+    // ---- Accompagnement rédigé par Gemini (dégradé gracieux si pas de clé) ----
+    // La clé vient du client (clé perso de l'utilisateur), jamais du serveur.
     let advice: { summary: string; tips: string[] } | null = null;
-    const geminiKey = Deno.env.get("GEMINI_API_KEY");
     if (geminiKey) {
       try {
         advice = await askGemini(geminiKey, analysis);
