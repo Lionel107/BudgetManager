@@ -160,7 +160,8 @@ class CategoryRepository(private val provider: SupabaseClientProvider) {
         iconName = iconName,
         isDefault = isDefault,
         displayOrder = displayOrder,
-        isActive = isActive
+        isActive = isActive,
+        isEssential = isEssential
     )
 
     private fun Category.toInsertDto() = CategoryDto(
@@ -171,6 +172,7 @@ class CategoryRepository(private val provider: SupabaseClientProvider) {
         iconName = iconName,
         isDefault = isDefault,
         displayOrder = displayOrder,
-        isActive = isActive
+        isActive = isActive,
+        isEssential = isEssential
     )
 }

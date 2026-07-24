@@ -103,8 +103,24 @@ data class Category(
     val iconName: String? = null,
     val isDefault: Boolean = false,
     val displayOrder: Int = 0,
+    val isActive: Boolean = true,
+    /** Dépense essentielle (besoin) vs superflu — utilisé par l'accompagnant IA. */
+    val isEssential: Boolean = true
+)
+
+/** Objectif financier : épargner un montant, ou ne pas dépasser un plafond, pour une date. */
+data class Objective(
+    val id: Long = 0,
+    val title: String,
+    val type: ObjectiveType,
+    val targetAmount: BigDecimal,
+    val targetDate: LocalDate? = null,
+    val categoryId: Long? = null,
+    val categoryName: String? = null,
     val isActive: Boolean = true
 )
+
+enum class ObjectiveType { SAVINGS, SPENDING_LIMIT }
 
 data class Transaction(
     val id: Long = 0,

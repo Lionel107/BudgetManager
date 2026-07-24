@@ -14,6 +14,7 @@ val appModule = module {
     single { com.budgetmanager.data.remote.SupabaseClientProvider() }
     single { com.budgetmanager.data.remote.AuthRepository(get()) }
     single { com.budgetmanager.data.repository.AdvisorRepository(get(), get()) }
+    single { com.budgetmanager.data.repository.ObjectiveRepository(get()) }
 
     // Database
     single {

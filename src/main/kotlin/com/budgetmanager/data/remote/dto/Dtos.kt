@@ -62,7 +62,21 @@ data class CategoryDto(
     @SerialName("icon_name") val iconName: String? = null,
     @SerialName("is_default") val isDefault: Boolean = false,
     @SerialName("display_order") val displayOrder: Int = 0,
-    @SerialName("is_active") val isActive: Boolean = true
+    @SerialName("is_active") val isActive: Boolean = true,
+    @SerialName("is_essential") val isEssential: Boolean = true
+)
+
+@Serializable
+data class ObjectiveDto(
+    val id: Long? = null,
+    @SerialName("user_id") val userId: String? = null,
+    val title: String,
+    val type: String,
+    @SerialName("target_amount") @Serializable(with = BigDecimalSerializer::class) val targetAmount: BigDecimal,
+    @SerialName("target_date") val targetDate: String? = null,
+    @SerialName("category_id") val categoryId: Long? = null,
+    @SerialName("is_active") val isActive: Boolean = true,
+    @SerialName("category") val category: CategoryRef? = null
 )
 
 @Serializable
