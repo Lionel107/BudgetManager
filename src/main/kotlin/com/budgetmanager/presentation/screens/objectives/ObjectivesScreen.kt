@@ -36,21 +36,21 @@ fun ObjectivesScreen() {
     val scope = rememberCoroutineScope()
     val objectives by remember { repo.getAll() }.collectAsState(initial = emptyList())
     var showDialog by remember { mutableStateOf(false) }
+    var createError by remember { mutableStateOf<String?>(null) }
 
     Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            SectionHeader(title = "Objectifs")
-            NeumorphicButton(text = "Nouvel objectif", icon = Icons.Filled.Add, onClick = { showDialog = true })
-        }
+        SectionHeader(title = "Objectifs")
         Spacer(Modifier.height(4.dp))
         Text(
             "Définis tes buts (épargner un montant pour une date, ou ne pas dépasser un plafond). L'IA s'en sert pour te proposer un plan.",
             style = MaterialTheme.typography.bodyMedium, color = NeumorphicTextSecondary
         )
+        Spacer(Modifier.height(12.dp))
+        NeumorphicButton(text = "Nouvel objectif", icon = Icons.Filled.Add, onClick = { showDialog = true })
+        createError?.let {
+            Spacer(Modifier.height(8.dp))
+            Text(it, color = NeumorphicBudgetAlert, style = MaterialTheme.typography.bodySmall)
+        }
         Spacer(Modifier.height(16.dp))
 
         if (objectives.isEmpty()) {
@@ -89,7 +89,10 @@ fun ObjectivesScreen() {
         ObjectiveDialog(
             onDismiss = { showDialog = false },
             onSave = { obj ->
-                scope.launch { runCatching { repo.create(obj) } }
+                scope.launch {
+                    createError = null
+                    try { repo.create(obj) } catch (e: Exception) { createError = "Échec de la création : ${e.message}" }
+                }
                 showDialog = false
             }
         )
