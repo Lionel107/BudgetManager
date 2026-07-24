@@ -192,11 +192,30 @@ Deno.serve(async (req: Request) => {
       category: o.category?.name ?? null,
     }));
 
-    // ---- Plan déterministe ORIENTÉ OBJECTIFS par défaut, affiné par Gemini si possible ----
-    const base = buildDeterministicPlan(catContext, objectives, monthlyIncome);
-    let plan = base.plan;
-    let summary = base.summary;
+    // ---- Construction du plan ----
+    type PlanItem = { category: string; monthlyAmount: number; rationale: string; essential: boolean };
+    const hasCurrent = Array.isArray(currentPlan) && (currentPlan as any[]).length > 0;
 
+    let plan: PlanItem[];
+    let summary: string;
+
+    if (hasCurrent) {
+      // L'utilisateur a déjà un plan (potentiellement édité à la main) → on le PRÉSERVE.
+      plan = (currentPlan as any[]).map((p) => ({
+        category: String(p.category ?? ""),
+        monthlyAmount: Number(p.monthlyAmount) || 0,
+        rationale: "Ton montant",
+        essential: essentialOf[String(p.category)] !== false,
+      }));
+      summary = "Tes montants actuels sont conservés.";
+    } else {
+      // Première proposition → plan déterministe orienté objectifs.
+      const base = buildDeterministicPlan(catContext, objectives, monthlyIncome);
+      plan = base.plan;
+      summary = base.summary;
+    }
+
+    // Affinage IA (remarques, optimisation objectifs) si clé dispo et Gemini répond.
     if (geminiKey) {
       try {
         const g = await askGeminiPlan(geminiKey, { monthlyIncome, categories: catContext, existingCategories, objectives, remarks, currentPlan });
@@ -207,9 +226,10 @@ Deno.serve(async (req: Request) => {
       } catch (e) {
         console.error("Gemini plan:", e);
         const quota = String(e).includes("429");
-        summary = quota
-          ? "Quota Gemini momentanément atteint : plan basé sur tes moyennes. Réessaie dans ~1 min pour la version optimisée et les ajustements par remarques."
-          : "IA indisponible pour l'instant : plan basé sur tes moyennes.";
+        // IMPORTANT : en cas d'échec IA, on NE recalcule PAS (les montants ci-dessus,
+        // édités ou déterministes, sont conservés). On explique juste.
+        summary = (hasCurrent ? "Tes montants sont conservés. " : summary + " ") +
+          (quota ? "IA en quota (réessaie dans ~1 min pour prendre en compte ta remarque)." : "IA indisponible pour l'instant.");
       }
     }
 
