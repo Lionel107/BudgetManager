@@ -81,7 +81,11 @@ Deno.serve(async (req: Request) => {
     if (txns.length === 0) return json({ error: "Pas assez de données pour proposer un budget." }, 422);
 
     const essentialOf: Record<string, boolean> = {};
-    for (const c of (catRes.data ?? []) as any[]) essentialOf[c.name] = c.is_essential !== false;
+    const existingCategories: string[] = [];
+    for (const c of (catRes.data ?? []) as any[]) {
+      essentialOf[c.name] = c.is_essential !== false;
+      existingCategories.push(c.name);
+    }
 
     const currentBudgetOf: Record<string, number> = {};
     for (const b of (budRes.data ?? []) as any[]) {
@@ -136,7 +140,7 @@ Deno.serve(async (req: Request) => {
 
     if (geminiKey) {
       try {
-        const g = await askGeminiPlan(geminiKey, { monthlyIncome, categories: catContext, objectives, remarks, currentPlan });
+        const g = await askGeminiPlan(geminiKey, { monthlyIncome, categories: catContext, existingCategories, objectives, remarks, currentPlan });
         if (g.plan.length > 0) {
           summary = g.summary;
           plan = g.plan.map((p) => ({ ...p, essential: essentialOf[p.category] !== false }));
@@ -167,13 +171,16 @@ ${JSON.stringify(ctx)}
 
 Règles :
 - Propose un budget MENSUEL par catégorie de dépense, réaliste et basé sur "monthlyAverage".
+- Utilise EN PRIORITÉ les catégories de "existingCategories" (réutilise leur nom EXACT).
+- Si une dépense n'entre dans AUCUNE catégorie existante, tu PEUX proposer une NOUVELLE
+  catégorie (nom court et clair) : elle sera créée automatiquement à l'application.
 - Priorise les catégories "essential:true" ; comprime plutôt les "essential:false" si besoin d'épargner.
 - Les catégories "seasonal:true" ne tombent que certains mois : budgète-les à leur moyenne mensuelle (provision) pour lisser sur l'année, sans t'alarmer d'un mois isolé.
 - Intègre les "objectives" : pour un objectif SAVINGS (épargner targetAmount d'ici targetDate), dégage la marge mensuelle nécessaire (revenu - dépenses). Pour SPENDING_LIMIT, respecte le plafond sur la catégorie visée.
 - La somme des budgets doit laisser une épargne cohérente vs monthlyIncome.
-- Si "remarks" est fourni, AJUSTE le "currentPlan" en tenant compte de la remarque.
+- Si "remarks" est fourni, AJUSTE le "currentPlan" en tenant compte de la remarque (garde les montants édités par l'utilisateur sauf si la remarque demande de les changer).
 Réponds UNIQUEMENT en JSON valide :
-{"summary": "2-3 phrases expliquant le plan et l'épargne dégagée", "plan": [{"category": "<nom exact de la liste>", "monthlyAmount": <nombre>, "rationale": "courte justification"}]}`;
+{"summary": "2-3 phrases expliquant le plan et l'épargne dégagée", "plan": [{"category": "<nom de catégorie, existante ou nouvelle>", "monthlyAmount": <nombre>, "rationale": "courte justification"}]}`;
 
   const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + key;
   const resp = await fetch(url, {

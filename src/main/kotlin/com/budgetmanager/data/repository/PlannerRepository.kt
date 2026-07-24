@@ -4,6 +4,8 @@ import com.budgetmanager.data.preferences.AppPreferences
 import com.budgetmanager.data.remote.SupabaseClientProvider
 import com.budgetmanager.domain.model.Budget
 import com.budgetmanager.domain.model.BudgetPeriodType
+import com.budgetmanager.domain.model.Category
+import com.budgetmanager.domain.model.TransactionType
 import io.github.jan.supabase.functions.functions
 import io.ktor.client.call.body
 import kotlinx.coroutines.flow.first
@@ -66,16 +68,34 @@ class PlannerRepository(
 
     /**
      * Applique le plan : pour chaque ligne, crée (ou met à jour si elle existe déjà)
-     * un budget MENSUEL sur la catégorie correspondante. Retourne le nombre appliqué.
+     * un budget MENSUEL sur la catégorie correspondante. Les catégories inconnues
+     * (proposées par l'IA ou ajoutées à la main) sont CRÉÉES automatiquement.
+     * Retourne le nombre de budgets appliqués.
      */
     suspend fun applyPlan(plan: List<PlanLine>): Int {
         val categories = categoryRepository.getAllCategories().first()
-        val nameToId = categories.associate { it.name to it.id }
+        val nameToId = categories.associate { it.name to it.id }.toMutableMap()
         val existingByCategory = budgetRepository.getAllBudgets().first().associateBy { it.categoryId }
 
         var applied = 0
+        var newColorIdx = 0
         for (line in plan) {
-            val catId = nameToId[line.category] ?: continue
+            if (line.category.isBlank() || line.monthlyAmount <= 0) continue
+
+            // Catégorie inconnue -> on la crée (dépense, couleur par défaut)
+            var catId = nameToId[line.category]
+            if (catId == null) {
+                catId = categoryRepository.createCategory(
+                    Category(
+                        name = line.category,
+                        categoryType = TransactionType.EXPENSE,
+                        color = NEW_CATEGORY_COLORS[newColorIdx++ % NEW_CATEGORY_COLORS.size],
+                        isEssential = line.essential
+                    )
+                )
+                nameToId[line.category] = catId
+            }
+
             val limit = BigDecimal.valueOf(line.monthlyAmount).setScale(2, RoundingMode.HALF_UP)
             val existing = existingByCategory[catId]
             if (existing != null) {
@@ -94,5 +114,9 @@ class PlannerRepository(
             applied++
         }
         return applied
+    }
+
+    private companion object {
+        val NEW_CATEGORY_COLORS = listOf("#6C63FF", "#E84393", "#00CEC9", "#FF9F43", "#2ED573", "#5F27CD")
     }
 }
