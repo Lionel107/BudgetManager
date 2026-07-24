@@ -219,9 +219,11 @@ Deno.serve(async (req: Request) => {
     if (geminiKey) {
       try {
         const g = await askGeminiPlan(geminiKey, { monthlyIncome, categories: catContext, existingCategories, objectives, remarks, currentPlan });
-        if (g.plan.length > 0) {
+        // Garde-fou : l'épargne n'est pas une dépense -> on retire toute ligne "épargne".
+        const cleaned = g.plan.filter((p) => !/(épargn|epargn|saving|économ|econom)/i.test(p.category));
+        if (cleaned.length > 0) {
           summary = g.summary;
-          plan = g.plan.map((p) => ({ ...p, essential: essentialOf[p.category] !== false }));
+          plan = cleaned.map((p) => ({ ...p, essential: essentialOf[p.category] !== false }));
         } else {
           summary = (hasCurrent ? "Tes montants sont conservés. " : summary + " ") + "IA : réponse vide.";
         }
@@ -254,6 +256,7 @@ ${JSON.stringify(ctx)}
 
 Règles :
 - OBJECTIF PRINCIPAL : construis le budget IDÉAL qui permet d'ATTEINDRE les "objectives", quitte à réduire le superflu. Ne te contente PAS de recopier les habitudes ("monthlyAverage") : sers-t'en pour connaître l'utilisateur, mais ajuste pour dégager l'épargne nécessaire aux objectifs.
+- ⚠️ L'ÉPARGNE N'EST PAS UNE DÉPENSE. Ne crée JAMAIS de catégorie "Épargne" / "Savings" / "Économies" dans le plan. L'épargne = monthlyIncome − (somme des budgets de dépense). Pour dégager X €/mois d'épargne (demandé via "objectives" OU via "remarks", ex. « je veux 1500 € d'épargne »), tu dois RÉDUIRE les budgets de dépense (les non essentiels d'abord) jusqu'à ce que monthlyIncome − somme(plan) ≥ X. Tu ne rajoutes PAS de ligne d'épargne.
 - Propose un budget MENSUEL par catégorie de dépense, réaliste.
 - Utilise EN PRIORITÉ les catégories de "existingCategories" (réutilise leur nom EXACT).
 - Si une dépense n'entre dans AUCUNE catégorie existante, tu PEUX proposer une NOUVELLE
