@@ -50,10 +50,10 @@ Deno.serve(async (req: Request) => {
       { global: { headers: { Authorization: authHeader } } },
     );
 
-    // 12 derniers mois
+    // Fenêtre de 12 mois (en UTC, cohérent avec les dates stockées)
     const now = new Date();
-    const from = new Date(now.getFullYear(), now.getMonth() - 11, 1);
-    const fromIso = from.toISOString();
+    const monthKeys = monthKeysWindow(now); // ["2025-08", ..., "2026-07"]
+    const fromIso = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1)).toISOString();
 
     const { data: txns, error } = await supabase
       .from("transactions")
@@ -82,20 +82,33 @@ Deno.serve(async (req: Request) => {
     }
 
     const categories = Object.entries(perCat).map(([name, d]) => {
-      const activeMonths = Object.keys(d.byMonth).length;
-      const peak = Object.entries(d.byMonth).sort((a, b) => b[1] - a[1]);
-      const peakShare = peak.length ? peak[0][1] / d.total : 0;
-      // Saisonnier : concentré sur peu de mois OU un mois domine largement
-      const seasonal = d.total >= 200 && (activeMonths <= 3 || peakShare >= 0.4);
-      const peakMonths = peak
-        .filter(([, v]) => v >= d.total * 0.2)
-        .map(([mk]) => MOIS_FR[parseInt(mk.slice(5, 7), 10)]);
+      // Valeurs par mois sur la fenêtre (mois sans dépense = 0) -> "mois typique" = médiane
+      const values = monthKeys.map((k) => d.byMonth[k] ?? 0);
+      const med = median(values);
+
+      // Un mois est un PIC s'il dépasse nettement le mois typique
+      // (excédent absolu significatif ET nettement au-dessus de la médiane).
+      const spikeIdx = values
+        .map((v, i) => ({ v, i }))
+        .filter(({ v }) => (v - med) >= 200 && v >= med * 1.4);
+
+      // Excédent saisonnier = ce qui dépasse le mois typique sur les mois de pic
+      const excess = spikeIdx.reduce((s, { v }) => s + (v - med), 0);
+
+      // Saisonnier : quelques pics (1 à 4 mois) portant un excédent notable
+      const seasonal = d.total >= 150 && spikeIdx.length >= 1 && spikeIdx.length <= 4 && excess >= 200;
+
+      const peakMonths = seasonal
+        ? spikeIdx.map(({ i }) => MOIS_FR[parseInt(monthKeys[i].slice(5, 7), 10)])
+        : [];
+
       return {
         name,
         annualTotal: round2(d.total),
-        monthlyProvision: round2(d.total / 12), // lissage annuel
+        monthlyAverage: round2(d.total / 12),       // pour le budget annuel lissé
         seasonal,
-        peakMonths: seasonal ? peakMonths : [],
+        peakMonths,
+        seasonalProvision: seasonal ? round2(excess / 12) : 0, // à mettre de côté chaque mois
       };
     }).sort((a, b) => b.annualTotal - a.annualTotal);
 
@@ -135,6 +148,23 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+// 12 clés de mois "YYYY-MM" (UTC) se terminant au mois courant.
+function monthKeysWindow(now: Date): string[] {
+  const keys: string[] = [];
+  for (let i = 11; i >= 0; i--) {
+    const dt = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+    keys.push(`${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}`);
+  }
+  return keys;
+}
+
+function median(arr: number[]): number {
+  if (arr.length === 0) return 0;
+  const s = [...arr].sort((a, b) => a - b);
+  const n = s.length;
+  return n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2;
+}
+
 async function askGemini(
   key: string,
   analysis: unknown,
@@ -143,7 +173,7 @@ async function askGemini(
 Voici l'analyse déterministe de ses 12 derniers mois (montants déjà calculés, ne les recalcule pas) :
 ${JSON.stringify(analysis)}
 
-Rédige un accompagnement PERSONNALISÉ en français. Insiste sur la SAISONNALITÉ : explique que les dépenses marquées "seasonal" ne sont pas mensuelles mais concentrées (ex. assurance, cadeaux, vacances) et qu'il faut les PROVISIONNER chaque mois (utilise monthlyProvision) pour ne pas être surpris.
+Rédige un accompagnement PERSONNALISÉ en français. Insiste sur la SAISONNALITÉ : les catégories marquées "seasonal" ont des dépenses concentrées sur certains mois (champ peakMonths, ex. assurance en mars, vacances l'été, cadeaux en décembre). Recommande de mettre de côté chaque mois le montant "seasonalProvision" (€/mois) pour absorber ces pics sans être surpris. Utilise "monthlyAverage" pour parler du coût lissé d'une catégorie.
 Réponds UNIQUEMENT en JSON valide, sans texte autour, au format :
 {"summary": "2-3 phrases de synthèse chaleureuse et utile", "tips": ["conseil 1", "conseil 2", "conseil 3", "conseil 4"]}`;
 

@@ -38,9 +38,10 @@ data class AdvisorTotals(
 data class CategoryStat(
     val name: String,
     val annualTotal: Double,
-    val monthlyProvision: Double,
+    val monthlyAverage: Double = 0.0,        // coût lissé (total / 12)
     val seasonal: Boolean = false,
-    val peakMonths: List<String> = emptyList()
+    val peakMonths: List<String> = emptyList(),
+    val seasonalProvision: Double = 0.0      // à mettre de côté chaque mois pour les pics
 )
 
 @Serializable

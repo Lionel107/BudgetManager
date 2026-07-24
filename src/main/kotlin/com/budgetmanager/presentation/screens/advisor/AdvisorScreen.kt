@@ -137,7 +137,7 @@ fun AdvisorScreen() {
                                 Column {
                                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                         Text(c.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
-                                        Text(eurMonth(c.monthlyProvision), color = NeumorphicPrimary, fontWeight = FontWeight.SemiBold)
+                                        Text(eurMonth(c.seasonalProvision), color = NeumorphicPrimary, fontWeight = FontWeight.SemiBold)
                                     }
                                     val months = if (c.peakMonths.isNotEmpty()) c.peakMonths.joinToString(", ") else "certains mois"
                                     Text(
@@ -185,7 +185,7 @@ private fun BudgetRow(c: CategoryStat) {
             if (c.seasonal) Text("saisonnier", style = MaterialTheme.typography.labelSmall, color = NeumorphicPrimary)
         }
         Column(horizontalAlignment = Alignment.End) {
-            Text(eurMonth(c.monthlyProvision), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+            Text(eurMonth(c.monthlyAverage), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
             Text("${eur(c.annualTotal)} / an", style = MaterialTheme.typography.labelSmall, color = NeumorphicTextTertiary)
         }
     }
