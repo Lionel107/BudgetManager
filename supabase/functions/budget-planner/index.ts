@@ -125,22 +125,29 @@ Deno.serve(async (req: Request) => {
       category: o.category?.name ?? null,
     }));
 
-    // ---- Plan : Gemini si clé, sinon déterministe (moyennes) ----
-    let plan: { category: string; monthlyAmount: number; rationale: string; essential: boolean }[];
-    let summary: string;
+    // ---- Plan déterministe (moyennes) par défaut, optimisé par Gemini si possible ----
+    let plan = catContext.map((c) => ({
+      category: c.category,
+      monthlyAmount: c.monthlyAverage,
+      rationale: c.seasonal ? "Moyenne mensuelle (catégorie saisonnière → provision)" : "Basé sur ta moyenne des 12 mois",
+      essential: c.essential,
+    }));
+    let summary = "Plan basé sur tes moyennes des 12 derniers mois. Ajoute ta clé Gemini (Réglages) pour un plan optimisé et des ajustements par remarques.";
 
     if (geminiKey) {
-      const g = await askGeminiPlan(geminiKey, { monthlyIncome, categories: catContext, objectives, remarks, currentPlan });
-      summary = g.summary;
-      plan = g.plan.map((p) => ({ ...p, essential: essentialOf[p.category] !== false }));
-    } else {
-      plan = catContext.map((c) => ({
-        category: c.category,
-        monthlyAmount: c.monthlyAverage,
-        rationale: c.seasonal ? "Moyenne mensuelle (catégorie saisonnière → provision)" : "Basé sur ta moyenne des 12 mois",
-        essential: c.essential,
-      }));
-      summary = "Plan basé sur tes moyennes des 12 derniers mois. Ajoute ta clé Gemini (Réglages) pour un plan optimisé et des ajustements par remarques.";
+      try {
+        const g = await askGeminiPlan(geminiKey, { monthlyIncome, categories: catContext, objectives, remarks, currentPlan });
+        if (g.plan.length > 0) {
+          summary = g.summary;
+          plan = g.plan.map((p) => ({ ...p, essential: essentialOf[p.category] !== false }));
+        }
+      } catch (e) {
+        console.error("Gemini plan:", e);
+        const quota = String(e).includes("429");
+        summary = quota
+          ? "Quota Gemini momentanément atteint : plan basé sur tes moyennes. Réessaie dans ~1 min pour la version optimisée et les ajustements par remarques."
+          : "IA indisponible pour l'instant : plan basé sur tes moyennes.";
+      }
     }
 
     return json({ monthlyIncome, summary, plan });
