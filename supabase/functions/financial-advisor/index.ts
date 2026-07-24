@@ -181,7 +181,8 @@ Réponds UNIQUEMENT en JSON valide, sans texte autour, au format :
   const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
   const reqBody = JSON.stringify({
     contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: { temperature: 0.7, responseMimeType: "application/json" },
+    // thinkingBudget: 0 -> désactive le "raisonnement" (gemini-2.5) = réponse rapide
+    generationConfig: { temperature: 0.7, responseMimeType: "application/json", thinkingConfig: { thinkingBudget: 0 } },
   });
   let lastErr = "";
   for (const model of models) {
