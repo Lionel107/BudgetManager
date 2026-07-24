@@ -228,13 +228,10 @@ Deno.serve(async (req: Request) => {
       } catch (e) {
         console.error("Gemini plan:", e);
         const msg = String(e);
-        const quota = msg.includes("429");
-        // IMPORTANT : en cas d'échec IA, on NE recalcule PAS (les montants ci-dessus,
-        // édités ou déterministes, sont conservés). On explique + on montre la cause.
+        // IMPORTANT : en cas d'échec IA, on NE recalcule PAS (montants conservés).
+        // On affiche le détail BRUT de l'erreur Gemini pour diagnostiquer (quelle limite).
         summary = (hasCurrent ? "Tes montants sont conservés. " : summary + " ") +
-          (quota
-            ? "IA en quota (429) : réessaie dans ~1 min."
-            : `IA indisponible : ${msg.slice(0, 140)}`);
+          `IA non appliquée — ${msg.slice(0, 260)}`;
       }
     } else {
       summary += " [DEBUG] Aucune clé Gemini reçue par la fonction — vérifie Réglages → Clé API.";
@@ -278,7 +275,10 @@ Réponds UNIQUEMENT en JSON valide :
       generationConfig: { temperature: 0.6, responseMimeType: "application/json" },
     }),
   });
-  if (!resp.ok) throw new Error("Gemini HTTP " + resp.status);
+  if (!resp.ok) {
+    const errBody = await resp.text().catch(() => "");
+    throw new Error("Gemini HTTP " + resp.status + " — " + errBody.slice(0, 400));
+  }
   const data = await resp.json();
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
   const parsed = JSON.parse(text);
