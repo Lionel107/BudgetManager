@@ -43,6 +43,69 @@ function median(arr: number[]): number {
   return n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2;
 }
 
+function monthsUntil(dateStr: string | null): number {
+  if (!dateStr) return 12;
+  const d = new Date(dateStr + "T00:00:00Z");
+  const now = new Date();
+  const m = (d.getUTCFullYear() - now.getUTCFullYear()) * 12 + (d.getUTCMonth() - now.getUTCMonth());
+  return Math.max(1, m);
+}
+
+type Cat = { category: string; monthlyAverage: number; essential: boolean; seasonal: boolean };
+type Obj = { type: string; targetAmount: number; targetDate: string | null; category: string | null };
+
+/**
+ * Plan déterministe ORIENTÉ OBJECTIFS (sans IA) : part des moyennes (pour te
+ * connaître), applique les plafonds d'objectifs, puis RÉDUIT les postes non
+ * essentiels pour dégager l'épargne mensuelle nécessaire à tes objectifs.
+ */
+function buildDeterministicPlan(cats: Cat[], objectives: Obj[], monthlyIncome: number) {
+  const limitFor: Record<string, number> = {};
+  let requiredSavings = 0;
+  for (const o of objectives) {
+    if (o.type === "SPENDING_LIMIT" && o.category) limitFor[o.category] = o.targetAmount;
+    if (o.type === "SAVINGS") requiredSavings += o.targetAmount / monthsUntil(o.targetDate);
+  }
+  requiredSavings = round2(requiredSavings);
+
+  const plan = cats.map((c) => {
+    let amt = c.monthlyAverage;
+    let rationale = c.seasonal ? "Provision mensuelle (dépense saisonnière)" : "Basé sur ta moyenne";
+    if (limitFor[c.category] != null && amt > limitFor[c.category]) {
+      amt = limitFor[c.category];
+      rationale = "Plafonné selon ton objectif";
+    }
+    return { category: c.category, monthlyAmount: round2(amt), rationale, essential: c.essential };
+  });
+
+  let summary: string;
+  if (requiredSavings > 0) {
+    const plannedExpenses = plan.reduce((s, p) => s + p.monthlyAmount, 0);
+    const margin = monthlyIncome - plannedExpenses;
+    const gap = round2(requiredSavings - margin);
+    if (gap > 0) {
+      const flexible = plan.filter((p) => !p.essential && p.monthlyAmount > 0);
+      const totalFlexible = flexible.reduce((s, p) => s + p.monthlyAmount, 0);
+      const maxCut = totalFlexible * 0.6; // plancher : on ne descend pas sous 40% du poste
+      const cut = Math.min(gap, maxCut);
+      if (cut > 0 && totalFlexible > 0) {
+        for (const p of flexible) {
+          const reduce = cut * (p.monthlyAmount / totalFlexible);
+          p.monthlyAmount = round2(Math.max(p.monthlyAmount * 0.4, p.monthlyAmount - reduce));
+          p.rationale = "Réduit pour financer ton objectif d'épargne";
+        }
+      }
+      summary = `Pour tes objectifs, il faut dégager ~${requiredSavings} €/mois d'épargne. J'ai réduit les postes non essentiels en conséquence` +
+        (cut < gap ? ". Objectif ambitieux : la marge reste insuffisante, revois le montant/la date ou réduis davantage un poste." : ".");
+    } else {
+      summary = `Bonne nouvelle : ton objectif (~${requiredSavings} €/mois d'épargne) est déjà couvert par ta marge actuelle. Plan basé sur tes moyennes.`;
+    }
+  } else {
+    summary = "Aucun objectif défini : plan basé sur tes moyennes. Crée un objectif dans l'onglet « Objectifs » pour que je construise un budget qui t'aide à l'atteindre.";
+  }
+  return { plan, summary };
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -129,14 +192,10 @@ Deno.serve(async (req: Request) => {
       category: o.category?.name ?? null,
     }));
 
-    // ---- Plan déterministe (moyennes) par défaut, optimisé par Gemini si possible ----
-    let plan = catContext.map((c) => ({
-      category: c.category,
-      monthlyAmount: c.monthlyAverage,
-      rationale: c.seasonal ? "Moyenne mensuelle (catégorie saisonnière → provision)" : "Basé sur ta moyenne des 12 mois",
-      essential: c.essential,
-    }));
-    let summary = "Plan basé sur tes moyennes des 12 derniers mois. Ajoute ta clé Gemini (Réglages) pour un plan optimisé et des ajustements par remarques.";
+    // ---- Plan déterministe ORIENTÉ OBJECTIFS par défaut, affiné par Gemini si possible ----
+    const base = buildDeterministicPlan(catContext, objectives, monthlyIncome);
+    let plan = base.plan;
+    let summary = base.summary;
 
     if (geminiKey) {
       try {
@@ -170,7 +229,8 @@ Contexte (chiffres déjà calculés sur 12 mois) :
 ${JSON.stringify(ctx)}
 
 Règles :
-- Propose un budget MENSUEL par catégorie de dépense, réaliste et basé sur "monthlyAverage".
+- OBJECTIF PRINCIPAL : construis le budget IDÉAL qui permet d'ATTEINDRE les "objectives", quitte à réduire le superflu. Ne te contente PAS de recopier les habitudes ("monthlyAverage") : sers-t'en pour connaître l'utilisateur, mais ajuste pour dégager l'épargne nécessaire aux objectifs.
+- Propose un budget MENSUEL par catégorie de dépense, réaliste.
 - Utilise EN PRIORITÉ les catégories de "existingCategories" (réutilise leur nom EXACT).
 - Si une dépense n'entre dans AUCUNE catégorie existante, tu PEUX proposer une NOUVELLE
   catégorie (nom court et clair) : elle sera créée automatiquement à l'application.
