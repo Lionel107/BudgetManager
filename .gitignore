@@ -43,3 +43,6 @@ secrets.properties
 # Config Supabase réelle (le modèle .example est versionné, lui)
 src/main/resources/supabase.properties
 pwa/config.js
+
+# Supabase CLI local state (link, versions) — machine-local, not for git
+supabase/.temp/
