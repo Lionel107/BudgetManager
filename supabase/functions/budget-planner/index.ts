@@ -133,12 +133,26 @@ Deno.serve(async (req: Request) => {
     const monthKeys = monthKeysWindow(now);
     const fromIso = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1)).toISOString();
 
-    const [txnRes, catRes, objRes, budRes] = await Promise.all([
+    const [txnRes, catRes, objRes, budRes, profRes] = await Promise.all([
       supabase.from("transactions").select("amount, transaction_type, date, category:categories(name)").gte("date", fromIso),
       supabase.from("categories").select("name, is_essential, category_type").eq("is_active", true).eq("category_type", "EXPENSE"),
       supabase.from("objectives").select("title, type, target_amount, target_date, category:categories(name)").eq("is_active", true),
       supabase.from("budgets").select("budget_limit, category:categories(name)"),
+      supabase.from("user_profiles").select("monthly_income, priorities, projects, never_cut, comfort, notes").maybeSingle(),
     ]);
+
+    // Profil utilisateur (mémoire de l'assistant) — peut être absent.
+    const prof = (profRes?.data ?? null) as any;
+    const profile = prof
+      ? {
+          priorities: prof.priorities ?? null,
+          projects: prof.projects ?? null,
+          neverCut: prof.never_cut ?? null,
+          comfort: prof.comfort ?? null,
+          notes: prof.notes ?? null,
+        }
+      : null;
+    const statedIncome = Number(prof?.monthly_income) || 0;
 
     const txns = (txnRes.data ?? []) as any[];
     if (txns.length === 0) return json({ error: "Pas assez de données pour proposer un budget." }, 422);
@@ -168,7 +182,9 @@ Deno.serve(async (req: Request) => {
       perCat[cat][mk] = (perCat[cat][mk] ?? 0) + amt;
     }
 
-    const monthlyIncome = round2(income / 12);
+    // Revenu mensuel : la valeur DÉCLARÉE dans le profil prime (plus fiable que
+    // la moyenne des transactions, surtout au début) ; sinon moyenne sur 12 mois.
+    const monthlyIncome = statedIncome > 0 ? round2(statedIncome) : round2(income / 12);
     const catContext = Object.entries(perCat).map(([name, byMonth]) => {
       const values = monthKeys.map((k) => byMonth[k] ?? 0);
       const total = values.reduce((a, b) => a + b, 0);
@@ -218,7 +234,7 @@ Deno.serve(async (req: Request) => {
     // Affinage IA (remarques, optimisation objectifs) si clé dispo et Gemini répond.
     if (geminiKey) {
       try {
-        const g = await askGeminiPlan(geminiKey, { monthlyIncome, categories: catContext, existingCategories, objectives, remarks, currentPlan });
+        const g = await askGeminiPlan(geminiKey, { monthlyIncome, profile, categories: catContext, existingCategories, objectives, remarks, currentPlan });
         // Garde-fou : l'épargne n'est pas une dépense -> on retire toute ligne "épargne".
         const cleaned = g.plan.filter((p) => !/(épargn|epargn|saving|économ|econom)/i.test(p.category));
         if (cleaned.length > 0) {
@@ -255,6 +271,7 @@ Contexte (chiffres déjà calculés sur 12 mois) :
 ${JSON.stringify(ctx)}
 
 Règles :
+- PROFIL DE L'UTILISATEUR (champ "profile", peut être null) : c'est sa mémoire. RESPECTE-le absolument. "priorities" = ce qui compte le plus (protège ces postes) ; "neverCut" = dépenses à NE PAS réduire (laisse-les confortables même s'il faut serrer ailleurs) ; "projects" = projets à venir (anticipe l'épargne correspondante) ; "comfort" = train de vie souhaité (donne le ton général, plus ou moins serré) ; "notes" = infos libres. Le profil PRIME sur les simples moyennes.
 - OBJECTIF PRINCIPAL : construis le budget IDÉAL qui permet d'ATTEINDRE les "objectives", quitte à réduire le superflu. Ne te contente PAS de recopier les habitudes ("monthlyAverage") : sers-t'en pour connaître l'utilisateur, mais ajuste pour dégager l'épargne nécessaire aux objectifs.
 - ⚠️ L'ÉPARGNE N'EST PAS UNE DÉPENSE. Ne crée JAMAIS de catégorie "Épargne" / "Savings" / "Économies" dans le plan. L'épargne = monthlyIncome − (somme des budgets de dépense). Pour dégager X €/mois d'épargne (demandé via "objectives" OU via "remarks", ex. « je veux 1500 € d'épargne »), tu dois RÉDUIRE les budgets de dépense (les non essentiels d'abord) jusqu'à ce que monthlyIncome − somme(plan) ≥ X. Tu ne rajoutes PAS de ligne d'épargne.
 - Propose un budget MENSUEL par catégorie de dépense, réaliste.
