@@ -122,6 +122,19 @@ data class Objective(
 
 enum class ObjectiveType { SAVINGS, SPENDING_LIMIT }
 
+/** Progression déterministe d'un objectif (calculée, sans IA). */
+data class ObjectiveProgress(
+    val objective: Objective,
+    /** SAVINGS : épargne mensuelle nécessaire pour tenir la date. Null si pas de date/plafond. */
+    val requiredMonthly: BigDecimal? = null,
+    /** SAVINGS : rythme d'épargne actuel ; SPENDING_LIMIT : dépensé ce mois. */
+    val currentMonthly: BigDecimal = BigDecimal.ZERO,
+    /** Santé 0..1+ : SAVINGS = rythme/nécessaire ; SPENDING_LIMIT = dépensé/plafond. */
+    val ratio: Float = 0f,
+    val onTrack: Boolean = true,
+    val label: String = ""
+)
+
 data class Transaction(
     val id: Long = 0,
     val accountId: Long,

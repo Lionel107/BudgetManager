@@ -16,8 +16,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardOptions
+import com.budgetmanager.data.repository.AnalysisRepository
 import com.budgetmanager.data.repository.ObjectiveRepository
 import com.budgetmanager.domain.model.Objective
+import com.budgetmanager.domain.model.ObjectiveProgress
 import com.budgetmanager.domain.model.ObjectiveType
 import com.budgetmanager.presentation.components.NeumorphicButton
 import com.budgetmanager.presentation.components.NeumorphicCard
@@ -33,10 +35,21 @@ import java.util.Locale
 @Composable
 fun ObjectivesScreen() {
     val repo = remember { getKoin().get<ObjectiveRepository>() }
+    val analysis = remember { getKoin().get<AnalysisRepository>() }
     val scope = rememberCoroutineScope()
     val objectives by remember { repo.getAll() }.collectAsState(initial = emptyList())
     var showDialog by remember { mutableStateOf(false) }
     var createError by remember { mutableStateOf<String?>(null) }
+    var progress by remember { mutableStateOf<Map<Long, ObjectiveProgress>>(emptyMap()) }
+
+    LaunchedEffect(objectives) {
+        if (objectives.isNotEmpty()) {
+            runCatching { analysis.objectiveProgress().associateBy { it.objective.id } }
+                .onSuccess { progress = it }
+        } else {
+            progress = emptyMap()
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         SectionHeader(title = "Objectifs")
@@ -78,6 +91,21 @@ fun ObjectivesScreen() {
                             modifier = Modifier.size(22.dp).clickable {
                                 scope.launch { runCatching { repo.delete(obj.id) } }
                             }
+                        )
+                    }
+                    progress[obj.id]?.let { p ->
+                        Spacer(Modifier.height(10.dp))
+                        val barColor = if (p.onTrack) IncomeColor else NeumorphicBudgetAlert
+                        LinearProgressIndicator(
+                            progress = p.ratio.coerceIn(0f, 1f),
+                            modifier = Modifier.fillMaxWidth(),
+                            color = barColor
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            (if (p.onTrack) "✅ " else "⚠️ ") + p.label,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (p.onTrack) NeumorphicTextSecondary else NeumorphicBudgetAlert
                         )
                     }
                 }
