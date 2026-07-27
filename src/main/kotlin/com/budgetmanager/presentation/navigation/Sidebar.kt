@@ -62,6 +62,7 @@ private val mainNavItems = listOf(
     // --- Analyse & motivation ---
     SidebarItem(Screen.ANALYTICS, "Analyse", Icons.Outlined.Analytics, Icons.Filled.Analytics),
     SidebarItem(Screen.ADVISOR, "Conseiller IA", Icons.Outlined.AutoAwesome, Icons.Filled.AutoAwesome),
+    SidebarItem(Screen.ANALYST, "Analyste", Icons.Outlined.Insights, Icons.Filled.Insights),
     SidebarItem(Screen.CHALLENGES, "Défis", Icons.Outlined.EmojiEvents, Icons.Filled.EmojiEvents),
     SidebarItem(Screen.BADGES, "Badges", Icons.Outlined.MilitaryTech, Icons.Filled.MilitaryTech),
     // --- Configuration & donnees ---
@@ -71,7 +72,7 @@ private val mainNavItems = listOf(
 )
 
 /** Indices of the FIRST item of each logical group → render a separator before them. */
-private val groupBoundaries = setOf(3, 8, 12)
+private val groupBoundaries = setOf(3, 8, 13)
 
 private val bottomNavItem = SidebarItem(Screen.SETTINGS, "Paramètres", Icons.Outlined.Settings, Icons.Filled.Settings)
 

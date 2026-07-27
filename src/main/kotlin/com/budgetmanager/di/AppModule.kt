@@ -16,6 +16,7 @@ val appModule = module {
     single { com.budgetmanager.data.repository.AdvisorRepository(get(), get()) }
     single { com.budgetmanager.data.repository.ObjectiveRepository(get()) }
     single { com.budgetmanager.data.repository.AnalysisRepository(get(), get()) }
+    single { com.budgetmanager.data.repository.AnalystRepository(get(), get(), get(), get(), get()) }
     single { com.budgetmanager.data.repository.PlannerRepository(get(), get(), get(), get()) }
 
     // Database
