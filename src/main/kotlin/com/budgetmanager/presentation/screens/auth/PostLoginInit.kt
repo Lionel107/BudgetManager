@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import com.budgetmanager.data.preferences.AppPreferences
 import com.budgetmanager.data.repository.AccountRepository
+import com.budgetmanager.data.repository.AnalysisRepository
 import com.budgetmanager.data.repository.BudgetRepository
 import com.budgetmanager.data.repository.CategoryRepository
 import com.budgetmanager.data.repository.RecurringTransactionRepository
@@ -13,6 +14,7 @@ import com.budgetmanager.domain.model.BudgetPeriodType
 import com.budgetmanager.domain.model.BudgetWithStatus
 import com.budgetmanager.presentation.components.NotificationCenter
 import com.budgetmanager.util.AdviceEngine
+import com.budgetmanager.util.AlertEngine
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -78,6 +80,12 @@ fun PostLoginInit() {
                         }
                     val advices = AdviceEngine().analyze(accounts, transactions, budgets, appPrefs.savingsGoal)
                     advices.forEach { NotificationCenter.addFromAdvice(it) }
+
+                    // Alertes déterministes dédiées (annuel-aware, objectifs, dépense inhabituelle)
+                    val analysisRepo = getKoin().get<AnalysisRepository>()
+                    val objectiveProgress = runCatching { analysisRepo.objectiveProgress() }.getOrDefault(emptyList())
+                    val alerts = AlertEngine().analyze(objectiveProgress, budgets, transactions)
+                    alerts.forEach { NotificationCenter.addFromAdvice(it) }
                 }
                 delay(60 * 60 * 1000L)
             }
