@@ -19,6 +19,7 @@ import com.budgetmanager.presentation.components.NeumorphicButton
 import com.budgetmanager.presentation.components.NeumorphicCard
 import com.budgetmanager.presentation.components.NeumorphicTextField
 import com.budgetmanager.presentation.components.SectionHeader
+import com.budgetmanager.presentation.screens.advisor.BudgetPlannerSection
 import com.budgetmanager.presentation.theme.*
 import kotlinx.coroutines.launch
 import org.koin.core.context.GlobalContext.get as getKoin
@@ -171,14 +172,17 @@ fun AssistantScreen() {
         }
 
         Spacer(Modifier.height(14.dp))
-        NeumorphicCard(modifier = Modifier.fillMaxWidth()) {
-            Text("🛠️ Et ensuite ?", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = NeumorphicPrimary)
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Une fois ton profil rempli, l'assistant se servira de ces informations — avec tes habitudes réelles et tes objectifs — pour te proposer un budget sur mesure, que tu pourras affiner en discutant avec lui. (Bientôt disponible ici.)",
-                style = MaterialTheme.typography.bodyMedium, color = NeumorphicTextSecondary
-            )
-        }
+        Text(
+            "Ton budget sur mesure",
+            style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = NeumorphicTextPrimary
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "L'assistant part de ton profil ci-dessus, de tes habitudes réelles et de tes objectifs pour te proposer un budget. Modifie les montants, fais-lui une remarque, puis applique.",
+            style = MaterialTheme.typography.bodySmall, color = NeumorphicTextTertiary
+        )
+        Spacer(Modifier.height(10.dp))
+        BudgetPlannerSection()
 
         Spacer(Modifier.height(24.dp))
     }
