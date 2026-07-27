@@ -13,6 +13,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.budgetmanager.data.repository.AccountRepository
 import com.budgetmanager.data.repository.CategoryRepository
+import com.budgetmanager.data.repository.LocalImportRepository
 import com.budgetmanager.data.repository.TransactionRepository
 import com.budgetmanager.presentation.components.*
 import com.budgetmanager.presentation.navigation.NavigationState
@@ -117,6 +118,9 @@ fun ImportScreen(navigationState: NavigationState) {
             modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // Migration de l'ancienne base locale vers le cloud (une seule fois)
+            LocalMigrationCard()
+
             // Info card
             NeumorphicCard(modifier = Modifier.fillMaxWidth(), elevation = 6.dp) {
                 Row(verticalAlignment = Alignment.Top) {
@@ -379,6 +383,80 @@ fun ImportScreen(navigationState: NavigationState) {
             }
 
             Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
+/**
+ * Carte de migration UNIQUE : importe l'ancienne base locale SQLite vers Supabase.
+ * Ne s'affiche que si des transactions locales existent.
+ */
+@Composable
+private fun LocalMigrationCard() {
+    val repo = remember { getKoin().get<LocalImportRepository>() }
+    val scope = rememberCoroutineScope()
+
+    var localCount by remember { mutableStateOf(0) }
+    var importing by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf<String?>(null) }
+    var success by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        localCount = withContext(Dispatchers.IO) { repo.localTransactionCount() }
+    }
+
+    if (localCount <= 0 && !success) return
+
+    NeumorphicCard(modifier = Modifier.fillMaxWidth(), elevation = 6.dp) {
+        Row(verticalAlignment = Alignment.Top) {
+            Icon(Icons.Filled.CloudUpload, null, tint = NeumorphicPrimary, modifier = Modifier.size(24.dp))
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "Migrer mes anciennes donnees",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Ton ancienne base locale contient $localCount transaction(s) qui ne sont pas encore dans le cloud. " +
+                        "Importe-les une fois pour retrouver ton historique (comptes, categories, budgets, transactions).",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = NeumorphicTextSecondary
+                )
+                Spacer(Modifier.height(12.dp))
+                if (importing) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(color = NeumorphicPrimary, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(10.dp))
+                        Text("Migration en cours...", color = NeumorphicTextSecondary)
+                    }
+                } else {
+                    NeumorphicButton(
+                        text = "Importer mes anciennes donnees",
+                        icon = Icons.Filled.CloudUpload,
+                        onClick = {
+                            importing = true; message = null
+                            scope.launch {
+                                val report = withContext(Dispatchers.IO) { runCatching { repo.import() } }
+                                    .getOrElse { com.budgetmanager.data.repository.ImportReport(false, "Erreur : ${it.message}") }
+                                importing = false
+                                success = report.done
+                                message = report.message
+                            }
+                        }
+                    )
+                }
+                message?.let {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        (if (success) "✅ " else "⚠️ ") + it +
+                            (if (success) " Reviens sur l'onglet Accueil ou redemarre l'app pour tout voir." else ""),
+                        color = if (success) IncomeColor else NeumorphicBudgetAlert,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
         }
     }
 }
