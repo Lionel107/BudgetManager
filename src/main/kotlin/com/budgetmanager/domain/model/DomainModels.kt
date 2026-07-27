@@ -122,6 +122,20 @@ data class Objective(
 
 enum class ObjectiveType { SAVINGS, SPENDING_LIMIT }
 
+/**
+ * Profil persistant et éditable de l'utilisateur — ce que l'agent Constructeur
+ * doit connaître pour bâtir le budget idéal. Rempli par l'accueil guidé, affinable.
+ */
+data class UserProfile(
+    val monthlyIncome: BigDecimal? = null,
+    val priorities: String = "",
+    val projects: String = "",
+    val neverCut: String = "",
+    val comfort: String = "",
+    val notes: String = "",
+    val onboardingDone: Boolean = false
+)
+
 /** Progression déterministe d'un objectif (calculée, sans IA). */
 data class ObjectiveProgress(
     val objective: Objective,

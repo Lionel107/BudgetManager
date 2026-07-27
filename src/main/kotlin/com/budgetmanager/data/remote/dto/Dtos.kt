@@ -204,3 +204,15 @@ data class BudgetDto(
     @SerialName("end_date") val endDate: String? = null,
     @SerialName("category") val category: CategoryRef? = null
 )
+
+@Serializable
+data class UserProfileDto(
+    @SerialName("user_id") val userId: String? = null,
+    @SerialName("monthly_income") @Serializable(with = BigDecimalSerializer::class) val monthlyIncome: BigDecimal? = null,
+    val priorities: String? = null,
+    val projects: String? = null,
+    @SerialName("never_cut") val neverCut: String? = null,
+    val comfort: String? = null,
+    val notes: String? = null,
+    @SerialName("onboarding_done") val onboardingDone: Boolean = false
+)
