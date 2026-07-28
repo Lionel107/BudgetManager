@@ -25,10 +25,19 @@ class ObjectiveRepository(private val provider: SupabaseClientProvider) {
     }
 
     fun getAll(): Flow<List<Objective>> = _refreshTrigger.map {
-        db.from("objectives").select(cols) {
-            filter { eq("is_active", true) }
-            order("target_date", Order.ASCENDING)
-        }.decodeList<ObjectiveDto>().map { it.toDomain() }
+        try {
+            db.from("objectives").select(cols) {
+                filter { eq("is_active", true) }
+                order("target_date", Order.ASCENDING)
+            }.decodeList<ObjectiveDto>().map { it.toDomain() }
+        } catch (e: Exception) {
+            // Repli si PostgREST ne connaît pas la relation objectives→categories
+            // (contrainte FK absente ou cache de schéma périmé) : on lit sans la jointure.
+            db.from("objectives").select(Columns.raw("*")) {
+                filter { eq("is_active", true) }
+                order("target_date", Order.ASCENDING)
+            }.decodeList<ObjectiveDto>().map { it.toDomain() }
+        }
     }
 
     suspend fun create(objective: Objective): Long {
