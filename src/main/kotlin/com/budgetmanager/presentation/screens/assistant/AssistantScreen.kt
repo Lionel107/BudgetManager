@@ -1,16 +1,23 @@
 package com.budgetmanager.presentation.screens.assistant
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.budgetmanager.data.repository.UserProfileRepository
@@ -49,6 +56,7 @@ fun AssistantScreen() {
     var saving by remember { mutableStateOf(false) }
     var savedAt by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var showOnboarding by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         loading = true
@@ -62,6 +70,7 @@ fun AssistantScreen() {
         neverCut = p.neverCut
         comfort = p.comfort
         notes = p.notes
+        showOnboarding = !p.onboardingDone
         loading = false
     }
 
@@ -104,6 +113,22 @@ fun AssistantScreen() {
             Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = NeumorphicPrimary)
             }
+        } else if (showOnboarding) {
+            OnboardingConversation(
+                onDone = { p ->
+                    scope.launch {
+                        val res = runCatching { repo.save(p) }
+                        res.onSuccess {
+                            profile = p
+                            income = p.monthlyIncome?.toPlainString() ?: ""
+                            priorities = p.priorities; projects = p.projects
+                            neverCut = p.neverCut; comfort = p.comfort; notes = p.notes
+                            showOnboarding = false
+                        }.onFailure { error = it.message ?: "Échec de l'enregistrement." }
+                    }
+                },
+                onSkip = { showOnboarding = false }
+            )
         } else {
         NeumorphicCard(modifier = Modifier.fillMaxWidth()) {
             Text(
@@ -183,6 +208,104 @@ fun AssistantScreen() {
         BudgetPlannerSection()
 
         Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+/**
+ * Accueil guidé sous forme de conversation SCRIPTÉE (déterministe, sans IA) :
+ * l'assistant pose ses questions une à une, chaque réponse remplit un champ du profil.
+ */
+@Composable
+private fun OnboardingConversation(onDone: (UserProfile) -> Unit, onSkip: () -> Unit) {
+    val questions = remember {
+        listOf(
+            "Bonjour ! 👋 Je vais te poser 5 petites questions pour bâtir un budget qui te ressemble vraiment. Pour commencer : quel est ton revenu mensuel net, à peu près ? (un chiffre suffit)",
+            "Parfait. Qu'est-ce qui compte le plus pour toi dans ta gestion d'argent ? (ex. épargner, voyager une fois par an, ne pas stresser sur les courses…)",
+            "Noté. As-tu des projets à venir qui demanderont de l'argent ? (voyage, achat, événement…) Si non, écris simplement « non ».",
+            "D'accord. Y a-t-il des dépenses que tu ne veux jamais réduire ? (ex. le sport, les sorties, la qualité de la nourriture…)",
+            "Dernière question : quel niveau de confort veux-tu garder au quotidien ? (ex. vivre correctement sans me priver, mais épargner reste prioritaire)"
+        )
+    }
+    val messages = remember { mutableStateListOf<Pair<String, String>>() }
+    val answers = remember { mutableStateListOf<String>() }
+    var step by remember { mutableStateOf(0) }
+    var input by remember { mutableStateOf("") }
+    var finished by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        if (messages.isEmpty()) messages.add("assistant" to questions[0])
+    }
+
+    fun submit() {
+        val a = input.trim()
+        if (a.isBlank() || finished) return
+        input = ""
+        messages.add("user" to a)
+        answers.add(a)
+        val next = step + 1
+        if (next < questions.size) {
+            step = next
+            messages.add("assistant" to questions[next])
+        } else {
+            finished = true
+            messages.add("assistant" to "Merci ! J'ai tout ce qu'il me faut. 🎉 Je prépare ton espace budget…")
+            val incomeStr = answers.getOrNull(0).orEmpty().replace(",", ".").filter { it.isDigit() || it == '.' }
+            val income = incomeStr.toBigDecimalOrNull()?.takeIf { it > java.math.BigDecimal.ZERO }
+            fun clean(i: Int): String {
+                val v = answers.getOrNull(i)?.trim().orEmpty()
+                return if (v.equals("non", true) || v.equals("aucun", true)) "" else v
+            }
+            onDone(
+                UserProfile(
+                    monthlyIncome = income,
+                    priorities = clean(1),
+                    projects = clean(2),
+                    neverCut = clean(3),
+                    comfort = clean(4),
+                    onboardingDone = true
+                )
+            )
+        }
+    }
+
+    NeumorphicCard(modifier = Modifier.fillMaxWidth()) {
+        Text("Faisons connaissance", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        messages.forEach { (role, text) ->
+            Spacer(Modifier.height(10.dp))
+            val isUser = role == "user"
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start) {
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (isUser) NeumorphicPrimary.copy(alpha = 0.12f) else NeumorphicDepressed)
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    Text(
+                        text, style = MaterialTheme.typography.bodyMedium,
+                        color = if (isUser) NeumorphicTextPrimary else NeumorphicTextSecondary
+                    )
+                }
+            }
+        }
+        if (!finished) {
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                NeumorphicTextField(
+                    value = input, onValueChange = { input = it },
+                    label = "", placeholder = "Ta réponse…", modifier = Modifier.weight(1f)
+                )
+                Spacer(Modifier.width(10.dp))
+                IconButton(onClick = { submit() }, enabled = input.isNotBlank()) {
+                    Icon(Icons.AutoMirrored.Filled.Send, "Envoyer", tint = NeumorphicPrimary)
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "Tu préfères remplir un formulaire ?",
+                style = MaterialTheme.typography.labelSmall, color = NeumorphicTextTertiary,
+                modifier = Modifier.clickable { onSkip() }
+            )
         }
     }
 }
