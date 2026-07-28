@@ -116,11 +116,15 @@ Deno.serve(async (req: Request) => {
     let geminiKey: string | undefined;
     let remarks: string | undefined;
     let currentPlan: unknown;
+    let message: string | undefined;      // message de chat de l'utilisateur
+    let history: unknown;                 // historique de conversation
     try {
       const body = await req.json();
       geminiKey = body?.geminiKey;
       remarks = body?.remarks;
       currentPlan = body?.currentPlan;
+      message = body?.message;
+      history = body?.history;
     } catch { /* pas de corps */ }
 
     const supabase = createClient(
@@ -231,10 +235,15 @@ Deno.serve(async (req: Request) => {
       summary = base.summary;
     }
 
-    // Affinage IA (remarques, optimisation objectifs) si clé dispo et Gemini répond.
+    // Le message de chat, s'il existe, tient lieu de remarque à appliquer.
+    const effectiveRemarks = (message && message.trim()) ? message.trim() : remarks;
+    let reply = "";
+
+    // Affinage IA (remarques/chat, optimisation objectifs) si clé dispo et Gemini répond.
     if (geminiKey) {
       try {
-        const g = await askGeminiPlan(geminiKey, { monthlyIncome, profile, categories: catContext, existingCategories, objectives, remarks, currentPlan });
+        const g = await askGeminiPlan(geminiKey, { monthlyIncome, profile, categories: catContext, existingCategories, objectives, remarks: effectiveRemarks, history, currentPlan });
+        reply = g.reply;
         // Garde-fou : l'épargne n'est pas une dépense -> on retire toute ligne "épargne".
         const cleaned = g.plan.filter((p) => !/(épargn|epargn|saving|économ|econom)/i.test(p.category));
         if (cleaned.length > 0) {
@@ -255,7 +264,7 @@ Deno.serve(async (req: Request) => {
       summary += " [DEBUG] Aucune clé Gemini reçue par la fonction — vérifie Réglages → Clé API.";
     }
 
-    return json({ monthlyIncome, summary, plan });
+    return json({ monthlyIncome, summary, plan, reply });
   } catch (e) {
     console.error(e);
     return json({ error: String(e) }, 500);
@@ -264,11 +273,17 @@ Deno.serve(async (req: Request) => {
 
 async function askGeminiPlan(
   key: string,
-  ctx: unknown,
-): Promise<{ summary: string; plan: { category: string; monthlyAmount: number; rationale: string }[] }> {
+  ctx: any,
+): Promise<{ reply: string; summary: string; plan: { category: string; monthlyAmount: number; rationale: string }[] }> {
+  const history = Array.isArray(ctx?.history) ? ctx.history : [];
+  const convo = history
+    .map((t: any) => `${t?.role === "assistant" ? "Assistant" : "Utilisateur"}: ${t?.text ?? ""}`)
+    .join("\n");
   const prompt = `Tu es un planificateur budgétaire bienveillant et réaliste (particulier, France, euros).
+Tu DIALOGUES avec l'utilisateur pour construire/affiner son budget mensuel.
 Contexte (chiffres déjà calculés sur 12 mois) :
 ${JSON.stringify(ctx)}
+${convo ? `\nConversation jusqu'ici :\n${convo}\n` : ""}
 
 Règles :
 - PROFIL DE L'UTILISATEUR (champ "profile", peut être null) : c'est sa mémoire. RESPECTE-le absolument. "priorities" = ce qui compte le plus (protège ces postes) ; "neverCut" = dépenses à NE PAS réduire (laisse-les confortables même s'il faut serrer ailleurs) ; "projects" = projets à venir (anticipe l'épargne correspondante) ; "comfort" = train de vie souhaité (donne le ton général, plus ou moins serré) ; "notes" = infos libres. Le profil PRIME sur les simples moyennes.
@@ -282,9 +297,10 @@ Règles :
 - Les catégories "seasonal:true" ne tombent que certains mois : budgète-les à leur moyenne mensuelle (provision) pour lisser sur l'année, sans t'alarmer d'un mois isolé.
 - Intègre les "objectives" : pour un objectif SAVINGS (épargner targetAmount d'ici targetDate), dégage la marge mensuelle nécessaire (revenu - dépenses). Pour SPENDING_LIMIT, respecte le plafond sur la catégorie visée.
 - La somme des budgets doit laisser une épargne cohérente vs monthlyIncome.
-- Si "remarks" est fourni, AJUSTE le "currentPlan" en tenant compte de la remarque (garde les montants édités par l'utilisateur sauf si la remarque demande de les changer).
+- Si "remarks" (le dernier message de l'utilisateur) est fourni, AJUSTE le "currentPlan" en conséquence (garde les montants qu'il a édités sauf s'il demande de les changer). Tiens compte de la "Conversation jusqu'ici".
+- Dans "reply", réponds DIRECTEMENT et brièvement à l'utilisateur, comme dans une conversation : dis ce que tu as changé et pourquoi, ou pose UNE question si tu as besoin d'une précision. Ton chaleureux, tutoie-le. Pas de listes à puces dans "reply".
 Réponds UNIQUEMENT en JSON valide :
-{"summary": "2-3 phrases expliquant le plan et l'épargne dégagée", "plan": [{"category": "<nom de catégorie, existante ou nouvelle>", "monthlyAmount": <nombre>, "rationale": "courte justification"}]}`;
+{"reply": "ta réponse conversationnelle à l'utilisateur (2-4 phrases)", "summary": "1 phrase de synthèse du plan et de l'épargne dégagée", "plan": [{"category": "<nom de catégorie, existante ou nouvelle>", "monthlyAmount": <nombre>, "rationale": "courte justification"}]}`;
 
   // Cascade de modèles : bascule au suivant si l'un est en quota (429) ou indisponible (503).
   const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
@@ -302,6 +318,7 @@ Réponds UNIQUEMENT en JSON valide :
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
       const parsed = JSON.parse(text);
       return {
+        reply: String(parsed.reply ?? ""),
         summary: String(parsed.summary ?? ""),
         plan: Array.isArray(parsed.plan)
           ? parsed.plan.map((p: any) => ({

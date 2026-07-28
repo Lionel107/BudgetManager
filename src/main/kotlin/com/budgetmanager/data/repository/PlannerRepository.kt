@@ -28,8 +28,13 @@ data class PlanResponse(
     val monthlyIncome: Double = 0.0,
     val summary: String = "",
     val plan: List<PlanLine> = emptyList(),
+    val reply: String = "",
     val error: String? = null
 )
+
+/** Un tour de conversation avec le planificateur (role = "user" | "assistant"). */
+@Serializable
+data class PlanTurn(val role: String, val text: String)
 
 @Serializable
 private data class PlanLineReq(val category: String, val monthlyAmount: Double)
@@ -38,6 +43,8 @@ private data class PlanLineReq(val category: String, val monthlyAmount: Double)
 private data class PlanRequest(
     val geminiKey: String,
     val remarks: String? = null,
+    val message: String? = null,
+    val history: List<PlanTurn> = emptyList(),
     val currentPlan: List<PlanLineReq>? = null
 )
 
@@ -60,6 +67,27 @@ class PlannerRepository(
             body = PlanRequest(
                 geminiKey = prefs.geminiApiKey,
                 remarks = remarks?.takeIf { it.isNotBlank() },
+                currentPlan = currentPlan?.map { PlanLineReq(it.category, it.monthlyAmount) }
+            )
+        )
+        return response.body<PlanResponse>()
+    }
+
+    /**
+     * Tour de conversation : l'utilisateur envoie un [message], l'assistant renvoie
+     * un plan ajusté + une réponse rédigée (champ `reply`). [history] = tours précédents.
+     */
+    suspend fun chatRefine(
+        message: String,
+        history: List<PlanTurn>,
+        currentPlan: List<PlanLine>?
+    ): PlanResponse {
+        val response = provider.client.functions.invoke(
+            function = "budget-planner",
+            body = PlanRequest(
+                geminiKey = prefs.geminiApiKey,
+                message = message,
+                history = history,
                 currentPlan = currentPlan?.map { PlanLineReq(it.category, it.monthlyAmount) }
             )
         )

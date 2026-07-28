@@ -1,21 +1,27 @@
 package com.budgetmanager.presentation.screens.advisor
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.budgetmanager.data.repository.CategoryRepository
 import com.budgetmanager.data.repository.PlanLine
+import com.budgetmanager.data.repository.PlanTurn
 import com.budgetmanager.data.repository.PlannerRepository
 import com.budgetmanager.presentation.components.NeumorphicButton
 import com.budgetmanager.presentation.components.NeumorphicCard
@@ -51,9 +57,13 @@ fun BudgetPlannerSection() {
 
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    var remarks by remember { mutableStateOf("") }
     var applyMsg by remember { mutableStateOf<String?>(null) }
     var proposed by remember { mutableStateOf(false) }
+
+    // Conversation de raffinement du plan
+    val chatMessages = remember { mutableStateListOf<PlanTurn>() }
+    var chatInput by remember { mutableStateOf("") }
+    var chatSending by remember { mutableStateOf(false) }
 
     var newCatName by remember { mutableStateOf("") }
     var newCatAmount by remember { mutableStateOf("") }
@@ -79,11 +89,40 @@ fun BudgetPlannerSection() {
                 if (res.error != null) error = res.error
                 else {
                     summary = res.summary; monthlyIncome = res.monthlyIncome
-                    loadResponse(res.plan); proposed = true; remarks = ""
+                    loadResponse(res.plan); proposed = true
+                    val intro = res.reply.ifBlank { res.summary }
+                    if (intro.isNotBlank()) {
+                        chatMessages.clear()
+                        chatMessages.add(PlanTurn("assistant", intro))
+                    }
                 }
             } catch (e: Exception) {
                 error = e.message ?: "Échec de la proposition."
             } finally { loading = false }
+        }
+    }
+
+    fun sendChat() {
+        val msg = chatInput.trim()
+        if (msg.isBlank() || chatSending) return
+        val history = chatMessages.toList()   // tours précédents (avant ce message)
+        chatInput = ""
+        chatMessages.add(PlanTurn("user", msg))
+        chatSending = true
+        scope.launch {
+            try {
+                val res = repo.chatRefine(msg, history, currentPlanLines())
+                if (res.error != null) {
+                    chatMessages.add(PlanTurn("assistant", "⚠️ ${res.error}"))
+                } else {
+                    summary = res.summary
+                    if (res.monthlyIncome > 0) monthlyIncome = res.monthlyIncome
+                    loadResponse(res.plan)
+                    chatMessages.add(PlanTurn("assistant", res.reply.ifBlank { res.summary.ifBlank { "C'est ajusté." } }))
+                }
+            } catch (e: Exception) {
+                chatMessages.add(PlanTurn("assistant", "⚠️ ${e.message ?: "Erreur."}"))
+            } finally { chatSending = false }
         }
     }
 
@@ -149,28 +188,63 @@ fun BudgetPlannerSection() {
                 }
             }
 
+            // ---- Discussion pour affiner le plan ----
             Spacer(Modifier.height(16.dp))
-            NeumorphicTextField(
-                value = remarks, onValueChange = { remarks = it },
-                label = "Une remarque pour l'IA ? (ex. « garde 150 € de loisirs », « je veux épargner plus »)",
-                placeholder = "Ta remarque…", singleLine = false, maxLines = 3, modifier = Modifier.fillMaxWidth()
+            Text(
+                "💬 Discute avec l'assistant pour ajuster",
+                style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = NeumorphicPrimary
             )
-            Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                NeumorphicButton(text = "Adapter avec l'IA", icon = Icons.Filled.Edit, isPrimary = false, onClick = { propose(remarks) })
-                NeumorphicButton(text = "Appliquer ce budget", icon = Icons.Filled.Check, onClick = {
-                    scope.launch {
-                        applyMsg = null
-                        try {
-                            val n = repo.applyPlan(currentPlanLines())
-                            existingNames = catRepo.getAllCategories().first().map { it.name }.toSet()
-                            applyMsg = "✅ $n budget(s) appliqué(s). Ajuste-les si besoin dans l'onglet Budgets."
-                        } catch (e: Exception) {
-                            applyMsg = "Échec de l'application : ${e.message}"
-                        }
+            chatMessages.forEach { m ->
+                Spacer(Modifier.height(8.dp))
+                val isUser = m.role == "user"
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start) {
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (isUser) NeumorphicPrimary.copy(alpha = 0.12f) else NeumorphicDepressed)
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            m.text, style = MaterialTheme.typography.bodyMedium,
+                            color = if (isUser) NeumorphicTextPrimary else NeumorphicTextSecondary
+                        )
                     }
-                })
+                }
             }
+            if (chatSending) {
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(color = NeumorphicPrimary, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("L'assistant ajuste le plan…", style = MaterialTheme.typography.bodySmall, color = NeumorphicTextTertiary)
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                NeumorphicTextField(
+                    value = chatInput, onValueChange = { chatInput = it },
+                    label = "", placeholder = "Ex. « garde 150 € de loisirs », « je veux épargner plus »…",
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(Modifier.width(10.dp))
+                IconButton(onClick = { sendChat() }, enabled = !chatSending && chatInput.isNotBlank()) {
+                    Icon(Icons.AutoMirrored.Filled.Send, "Envoyer", tint = NeumorphicPrimary)
+                }
+            }
+
+            Spacer(Modifier.height(14.dp))
+            NeumorphicButton(text = "Appliquer ce budget", icon = Icons.Filled.Check, onClick = {
+                scope.launch {
+                    applyMsg = null
+                    try {
+                        val n = repo.applyPlan(currentPlanLines())
+                        existingNames = catRepo.getAllCategories().first().map { it.name }.toSet()
+                        applyMsg = "✅ $n budget(s) appliqué(s). Ajuste-les si besoin dans l'onglet Budgets."
+                    } catch (e: Exception) {
+                        applyMsg = "Échec de l'application : ${e.message}"
+                    }
+                }
+            })
         }
 
         error?.let {
