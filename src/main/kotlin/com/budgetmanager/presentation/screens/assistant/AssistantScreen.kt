@@ -104,9 +104,7 @@ fun AssistantScreen() {
             Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = NeumorphicPrimary)
             }
-            return@Column
-        }
-
+        } else {
         NeumorphicCard(modifier = Modifier.fillMaxWidth()) {
             Text(
                 if (firstTime) "Faisons connaissance" else "Ton profil",
@@ -185,6 +183,7 @@ fun AssistantScreen() {
         BudgetPlannerSection()
 
         Spacer(Modifier.height(24.dp))
+        }
     }
 }
 
