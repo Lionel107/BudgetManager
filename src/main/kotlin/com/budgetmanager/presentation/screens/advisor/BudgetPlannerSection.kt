@@ -21,6 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.budgetmanager.data.repository.CategoryRepository
 import com.budgetmanager.data.repository.PlanLine
+import com.budgetmanager.data.repository.PlanObjective
 import com.budgetmanager.data.repository.PlanTurn
 import com.budgetmanager.data.repository.PlannerRepository
 import com.budgetmanager.presentation.components.NeumorphicButton
@@ -65,6 +66,9 @@ fun BudgetPlannerSection() {
     var chatInput by remember { mutableStateOf("") }
     var chatSending by remember { mutableStateOf(false) }
 
+    // Objectifs proposés par l'assistant (créés à l'application)
+    var proposedObjectives by remember { mutableStateOf<List<PlanObjective>>(emptyList()) }
+
     var newCatName by remember { mutableStateOf("") }
     var newCatAmount by remember { mutableStateOf("") }
 
@@ -90,6 +94,7 @@ fun BudgetPlannerSection() {
                 else {
                     summary = res.summary; monthlyIncome = res.monthlyIncome
                     loadResponse(res.plan); proposed = true
+                    if (res.newObjectives.isNotEmpty()) proposedObjectives = res.newObjectives
                     val intro = res.reply.ifBlank { res.summary }
                     if (intro.isNotBlank()) {
                         chatMessages.clear()
@@ -118,6 +123,7 @@ fun BudgetPlannerSection() {
                     summary = res.summary
                     if (res.monthlyIncome > 0) monthlyIncome = res.monthlyIncome
                     loadResponse(res.plan)
+                    if (res.newObjectives.isNotEmpty()) proposedObjectives = res.newObjectives
                     chatMessages.add(PlanTurn("assistant", res.reply.ifBlank { res.summary.ifBlank { "C'est ajusté." } }))
                 }
             } catch (e: Exception) {
@@ -232,14 +238,39 @@ fun BudgetPlannerSection() {
                 }
             }
 
+            // Objectifs proposés par l'assistant (créés à l'application)
+            if (proposedObjectives.isNotEmpty()) {
+                Spacer(Modifier.height(14.dp))
+                Text("🎯 Objectifs proposés", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = NeumorphicPrimary)
+                Text("Ils seront créés dans l'onglet Objectifs quand tu appliqueras.", style = MaterialTheme.typography.labelSmall, color = NeumorphicTextTertiary)
+                proposedObjectives.forEach { o ->
+                    Spacer(Modifier.height(6.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(o.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                            val typeLabel = if (o.type == "SAVINGS") "Épargne" else "Plafond"
+                            val dateLabel = o.targetDate?.let { " · d'ici le $it" } ?: ""
+                            Text(
+                                "$typeLabel · ${String.format(Locale.FRANCE, "%,.0f €", o.targetAmount)}$dateLabel",
+                                style = MaterialTheme.typography.labelSmall, color = NeumorphicTextSecondary
+                            )
+                        }
+                    }
+                }
+            }
+
             Spacer(Modifier.height(14.dp))
             NeumorphicButton(text = "Appliquer ce budget", icon = Icons.Filled.Check, onClick = {
                 scope.launch {
                     applyMsg = null
                     try {
                         val n = repo.applyPlan(currentPlanLines())
+                        val objCount = repo.applyObjectives(proposedObjectives)
                         existingNames = catRepo.getAllCategories().first().map { it.name }.toSet()
-                        applyMsg = "✅ $n budget(s) appliqué(s). Ajuste-les si besoin dans l'onglet Budgets."
+                        proposedObjectives = emptyList()
+                        applyMsg = "✅ $n budget(s)" +
+                            (if (objCount > 0) " et $objCount objectif(s)" else "") +
+                            " appliqué(s). Ajuste-les si besoin dans Budgets / Objectifs."
                     } catch (e: Exception) {
                         applyMsg = "Échec de l'application : ${e.message}"
                     }

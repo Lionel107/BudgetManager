@@ -5,6 +5,8 @@ import com.budgetmanager.data.remote.SupabaseClientProvider
 import com.budgetmanager.domain.model.Budget
 import com.budgetmanager.domain.model.BudgetPeriodType
 import com.budgetmanager.domain.model.Category
+import com.budgetmanager.domain.model.Objective
+import com.budgetmanager.domain.model.ObjectiveType
 import com.budgetmanager.domain.model.TransactionType
 import io.github.jan.supabase.functions.functions
 import io.ktor.client.call.body
@@ -12,6 +14,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.serialization.Serializable
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.time.LocalDate
 
 // ===== DTO d'échange avec l'Edge Function budget-planner =====
 
@@ -29,7 +32,18 @@ data class PlanResponse(
     val summary: String = "",
     val plan: List<PlanLine> = emptyList(),
     val reply: String = "",
+    val newObjectives: List<PlanObjective> = emptyList(),
     val error: String? = null
+)
+
+/** Objectif proposé par l'assistant pendant la conversation (créé sur validation). */
+@Serializable
+data class PlanObjective(
+    val title: String,
+    val type: String,               // "SAVINGS" | "SPENDING_LIMIT"
+    val targetAmount: Double,
+    val targetDate: String? = null, // AAAA-MM-JJ
+    val category: String? = null
 )
 
 /** Un tour de conversation avec le planificateur (role = "user" | "assistant"). */
@@ -57,7 +71,8 @@ class PlannerRepository(
     private val provider: SupabaseClientProvider,
     private val prefs: AppPreferences,
     private val categoryRepository: CategoryRepository,
-    private val budgetRepository: BudgetRepository
+    private val budgetRepository: BudgetRepository,
+    private val objectiveRepository: ObjectiveRepository
 ) {
 
     /** Demande un plan (remarks/currentPlan pour réadapter un plan existant). */
@@ -142,6 +157,31 @@ class PlannerRepository(
             applied++
         }
         return applied
+    }
+
+    /**
+     * Crée les objectifs proposés par l'assistant (sur validation de l'utilisateur).
+     * Mappe la catégorie éventuelle (plafond) par nom. Retourne le nombre créé.
+     */
+    suspend fun applyObjectives(objectives: List<PlanObjective>): Int {
+        if (objectives.isEmpty()) return 0
+        val nameToId = categoryRepository.getAllCategories().first()
+            .associate { it.name.trim().lowercase() to it.id }
+        var created = 0
+        for (o in objectives) {
+            val type = runCatching { ObjectiveType.valueOf(o.type) }.getOrNull() ?: continue
+            val amount = BigDecimal.valueOf(o.targetAmount).setScale(2, RoundingMode.HALF_UP)
+            if (amount <= BigDecimal.ZERO) continue
+            val date = o.targetDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+            val catId = o.category?.let { nameToId[it.trim().lowercase()] }
+            runCatching {
+                objectiveRepository.create(
+                    Objective(title = o.title, type = type, targetAmount = amount, targetDate = date, categoryId = catId)
+                )
+                created++
+            }
+        }
+        return created
     }
 
     private companion object {

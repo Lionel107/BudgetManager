@@ -238,12 +238,14 @@ Deno.serve(async (req: Request) => {
     // Le message de chat, s'il existe, tient lieu de remarque à appliquer.
     const effectiveRemarks = (message && message.trim()) ? message.trim() : remarks;
     let reply = "";
+    let newObjectives: any[] = [];
 
     // Affinage IA (remarques/chat, optimisation objectifs) si clé dispo et Gemini répond.
     if (geminiKey) {
       try {
         const g = await askGeminiPlan(geminiKey, { monthlyIncome, profile, categories: catContext, existingCategories, objectives, remarks: effectiveRemarks, history, currentPlan });
         reply = g.reply;
+        newObjectives = g.newObjectives;
         // Garde-fou : l'épargne n'est pas une dépense -> on retire toute ligne "épargne".
         const cleaned = g.plan.filter((p) => !/(épargn|epargn|saving|économ|econom)/i.test(p.category));
         if (cleaned.length > 0) {
@@ -264,17 +266,25 @@ Deno.serve(async (req: Request) => {
       summary += " [DEBUG] Aucune clé Gemini reçue par la fonction — vérifie Réglages → Clé API.";
     }
 
-    return json({ monthlyIncome, summary, plan, reply });
+    return json({ monthlyIncome, summary, plan, reply, newObjectives });
   } catch (e) {
     console.error(e);
     return json({ error: String(e) }, 500);
   }
 });
 
+interface NewObjective {
+  title: string;
+  type: string;
+  targetAmount: number;
+  targetDate: string | null;
+  category: string | null;
+}
+
 async function askGeminiPlan(
   key: string,
   ctx: any,
-): Promise<{ reply: string; summary: string; plan: { category: string; monthlyAmount: number; rationale: string }[] }> {
+): Promise<{ reply: string; summary: string; plan: { category: string; monthlyAmount: number; rationale: string }[]; newObjectives: NewObjective[] }> {
   const history = Array.isArray(ctx?.history) ? ctx.history : [];
   const convo = history
     .map((t: any) => `${t?.role === "assistant" ? "Assistant" : "Utilisateur"}: ${t?.text ?? ""}`)
@@ -299,8 +309,9 @@ Règles :
 - La somme des budgets doit laisser une épargne cohérente vs monthlyIncome.
 - Si "remarks" (le dernier message de l'utilisateur) est fourni, AJUSTE le "currentPlan" en conséquence (garde les montants qu'il a édités sauf s'il demande de les changer). Tiens compte de la "Conversation jusqu'ici".
 - Dans "reply", réponds DIRECTEMENT et brièvement à l'utilisateur, comme dans une conversation : dis ce que tu as changé et pourquoi, ou pose UNE question si tu as besoin d'une précision. Ton chaleureux, tutoie-le. Pas de listes à puces dans "reply".
+- "newObjectives" : SEULEMENT si la conversation (ou le profil) révèle un BUT chiffré et concret que l'utilisateur n'a PAS encore formalisé (ex. « je veux épargner 3000 € pour décembre », « ne pas dépasser 200 € de resto »). Ne propose JAMAIS un objectif déjà présent dans "objectives". Dans le doute, laisse [] (tableau vide). type = "SAVINGS" (épargner un montant pour une date) ou "SPENDING_LIMIT" (plafond sur une catégorie). targetDate au format AAAA-MM-JJ ou null. category = nom de catégorie pour un plafond, sinon null.
 Réponds UNIQUEMENT en JSON valide :
-{"reply": "ta réponse conversationnelle à l'utilisateur (2-4 phrases)", "summary": "1 phrase de synthèse du plan et de l'épargne dégagée", "plan": [{"category": "<nom de catégorie, existante ou nouvelle>", "monthlyAmount": <nombre>, "rationale": "courte justification"}]}`;
+{"reply": "ta réponse conversationnelle à l'utilisateur (2-4 phrases)", "summary": "1 phrase de synthèse du plan et de l'épargne dégagée", "plan": [{"category": "<nom de catégorie, existante ou nouvelle>", "monthlyAmount": <nombre>, "rationale": "courte justification"}], "newObjectives": [{"title": "<titre court>", "type": "SAVINGS|SPENDING_LIMIT", "targetAmount": <nombre>, "targetDate": "AAAA-MM-JJ ou null", "category": "<nom ou null>"}]}`;
 
   // Cascade de modèles : bascule au suivant si l'un est en quota (429) ou indisponible (503).
   const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
@@ -326,6 +337,17 @@ Réponds UNIQUEMENT en JSON valide :
               monthlyAmount: Number(p.monthlyAmount) || 0,
               rationale: String(p.rationale ?? ""),
             }))
+          : [],
+        newObjectives: Array.isArray(parsed.newObjectives)
+          ? parsed.newObjectives
+              .filter((o: any) => o && o.title && (o.type === "SAVINGS" || o.type === "SPENDING_LIMIT") && Number(o.targetAmount) > 0)
+              .map((o: any) => ({
+                title: String(o.title),
+                type: String(o.type),
+                targetAmount: Number(o.targetAmount) || 0,
+                targetDate: o.targetDate && /^\d{4}-\d{2}-\d{2}$/.test(String(o.targetDate)) ? String(o.targetDate) : null,
+                category: o.category ? String(o.category) : null,
+              }))
           : [],
       };
     }
