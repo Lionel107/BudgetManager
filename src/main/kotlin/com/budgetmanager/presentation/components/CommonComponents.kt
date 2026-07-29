@@ -22,6 +22,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -361,14 +363,18 @@ fun NeumorphicButton(
                     !enabled -> Modifier
                         .clip(RoundedCornerShape(12.dp))
                         .background(NeumorphicDepressed)
-                    isPrimary && isHovered -> Modifier.neumorphicPressed(
-                        depth = 4.dp,
-                        borderRadius = 12.dp,
-                        backgroundColor = NeumorphicPrimary.copy(alpha = 0.85f)
-                    )
                     isPrimary -> Modifier
+                        // dégradé néon indigo→cyan + glow (accent unique de l'écran)
+                        .shadow(
+                            elevation = if (isHovered) 16.dp else 10.dp,
+                            shape = RoundedCornerShape(12.dp),
+                            spotColor = NeumorphicPrimary,
+                            ambientColor = NeumorphicPrimary
+                        )
                         .clip(RoundedCornerShape(12.dp))
-                        .background(NeumorphicPrimary)
+                        .background(
+                            Brush.linearGradient(listOf(NeumorphicPrimary, NeumorphicPrimaryVariant))
+                        )
                     isHovered -> Modifier.neumorphicPressed(
                         depth = 4.dp,
                         borderRadius = 12.dp,

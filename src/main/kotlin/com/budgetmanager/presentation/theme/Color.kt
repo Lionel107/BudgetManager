@@ -31,26 +31,26 @@ data class NeumorphicColors(
 // ===== Light Theme =====
 
 val LightNeumorphicColors = NeumorphicColors(
-    background = Color(0xFFE0E5EC),
-    elevated = Color(0xFFE8EDF4),
-    depressed = Color(0xFFD1D9E6),
-    primary = Color(0xFF6C63FF),
-    primaryVariant = Color(0xFF5A52D5),
-    textPrimary = Color(0xFF2D3436),
-    textSecondary = Color(0xFF636E72),
-    textTertiary = Color(0xFFB2BEC3),
+    background = Color(0xFFF2F5F9),        // fond blanc cassé très lumineux
+    elevated = Color(0xFFFFFFFF),          // panneaux : blanc pur
+    depressed = Color(0xFFECEFF4),         // creux (cavités)
+    primary = Color(0xFF6D5EF6),           // indigo néon (1er arrêt du dégradé)
+    primaryVariant = Color(0xFF22D3EE),    // cyan néon (2e arrêt du dégradé)
+    textPrimary = Color(0xFF182130),
+    textSecondary = Color(0xFF576071),
+    textTertiary = Color(0xFF96A0B1),
     lightShadow = Color(0xFFFFFFFF),
-    darkShadow = Color(0xFFA3B1C6),
-    income = Color(0xFF00B894),
-    expense = Color(0xFFE17055),
-    budgetSafe = Color(0xFF00A676),
-    budgetWarning = Color(0xFFE69500),
-    budgetAlert = Color(0xFFD63031),
-    transfer = Color(0xFF74B9FF),
-    cardBackground = Color(0xFFE8EDF4),
-    dialogBackground = Color(0xFFE8EDF4),
-    textFieldFocused = Color.White.copy(alpha = 0.5f),
-    textFieldUnfocused = Color(0xFFD1D9E6).copy(alpha = 0.6f),
+    darkShadow = Color(0xFFBFC6D3),        // ombre neutre (sans bleu)
+    income = Color(0xFF0FC9A6),            // menthe
+    expense = Color(0xFFFF6B81),           // corail-rose
+    budgetSafe = Color(0xFF0FC9A6),
+    budgetWarning = Color(0xFFF5A623),
+    budgetAlert = Color(0xFFFF5C6A),
+    transfer = Color(0xFF38BDF8),
+    cardBackground = Color(0xFFFFFFFF),
+    dialogBackground = Color(0xFFFFFFFF),
+    textFieldFocused = Color.White.copy(alpha = 0.9f),
+    textFieldUnfocused = Color(0xFFECEFF4).copy(alpha = 0.9f),
 )
 
 // ===== Dark Theme =====
