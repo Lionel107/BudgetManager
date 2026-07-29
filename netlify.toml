@@ -1,0 +1,14 @@
+# ============================================================================
+# Déploiement automatique de la PWA (dossier pwa/) sur Netlify depuis GitHub.
+#
+# config.js contient l'URL Supabase + la clé anon (PUBLIQUE par design, protégée
+# par la RLS) mais reste hors du dépôt (gitignore). Il est donc GÉNÉRÉ au build à
+# partir de deux variables d'environnement Netlify à définir une seule fois dans
+#   Site settings → Environment variables :
+#     SUPABASE_URL        = https://rrjavbjsjnbmjokqbcll.supabase.co
+#     SUPABASE_ANON_KEY   = <ta clé anon>
+# ============================================================================
+
+[build]
+  publish = "pwa"
+  command = "printf 'window.SUPABASE_CONFIG = { url: \"%s\", anonKey: \"%s\" };\\n' \"$SUPABASE_URL\" \"$SUPABASE_ANON_KEY\" > pwa/config.js"

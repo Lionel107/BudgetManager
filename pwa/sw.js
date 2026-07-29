@@ -1,7 +1,10 @@
 // Service worker minimal : met en cache la coquille de l'app pour un chargement
 // hors-ligne. Les données restent en réseau (online-first) — non mises en cache.
-const CACHE = "budgetmanager-pwa-v2";
-const SHELL = ["./", "./index.html", "./app.js", "./config.js", "./manifest.webmanifest", "./icon.svg"];
+const CACHE = "budgetmanager-pwa-v3";
+const SHELL = [
+  "./", "./index.html", "./app.js", "./config.js", "./manifest.webmanifest",
+  "./icon.svg", "./icon-192.png", "./icon-512.png", "./icon-512-maskable.png"
+];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
