@@ -10,6 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
 import androidx.compose.ui.draw.clip
@@ -291,31 +292,16 @@ fun HomeScreen(navigationState: NavigationState) {
 
             Spacer(Modifier.height(24.dp))
 
-            // Income / Expenses / Net row
+            // Income / Expenses / Net — À PLAT (posé sur le fond, filets fins)
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                BalanceCard(
-                    title = "Revenus du mois",
-                    amount = ui.monthlyIncome,
-                    icon = Icons.Filled.TrendingUp,
-                    amountColor = IncomeColor,
-                    modifier = Modifier.weight(1f)
-                )
-                BalanceCard(
-                    title = "Dépenses du mois",
-                    amount = ui.monthlyExpenses,
-                    icon = Icons.Filled.TrendingDown,
-                    amountColor = ExpenseColor,
-                    modifier = Modifier.weight(1f)
-                )
-                BalanceCard(
-                    title = "Net du mois",
-                    amount = ui.monthlyIncome.subtract(ui.monthlyExpenses),
-                    icon = Icons.Filled.Balance,
-                    modifier = Modifier.weight(1f)
-                )
+                FlatStat("Revenus du mois", ui.monthlyIncome, IncomeColor, Modifier.weight(1f))
+                StatDivider()
+                FlatStat("Dépenses du mois", ui.monthlyExpenses, ExpenseColor, Modifier.weight(1f))
+                StatDivider()
+                FlatStat("Net du mois", ui.monthlyIncome.subtract(ui.monthlyExpenses), null, Modifier.weight(1f))
             }
 
             Spacer(Modifier.height(24.dp))
@@ -370,9 +356,11 @@ fun HomeScreen(navigationState: NavigationState) {
             if (ui.monthlyIncome > BigDecimal.ZERO || ui.monthlyExpenses > BigDecimal.ZERO) {
                 SectionHeader(title = "Projection (au rythme actuel)")
                 Spacer(Modifier.height(8.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     ProjectionCard("Dans 1 mois", ui.projection1Month, modifier = Modifier.weight(1f))
+                    StatDivider()
                     ProjectionCard("Dans 3 mois", ui.projection3Months, modifier = Modifier.weight(1f))
+                    StatDivider()
                     ProjectionCard("Dans 6 mois", ui.projection6Months, modifier = Modifier.weight(1f))
                 }
                 Spacer(Modifier.height(20.dp))
@@ -394,10 +382,7 @@ fun HomeScreen(navigationState: NavigationState) {
                     onAction = { navigationState.navigateTo(Screen.ADD_TRANSACTION) }
                 )
             } else {
-                NeumorphicCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    elevation = 6.dp
-                ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
                     ui.recentTransactions.forEachIndexed { index, tx ->
                         TransactionItem(
                             title = tx.title,
@@ -431,7 +416,12 @@ private fun NetWorthChart(history: List<Pair<String, BigDecimal>>) {
     val firstValue = history.firstOrNull()?.second ?: BigDecimal.ZERO
     val totalChange = current.subtract(firstValue)
 
-    NeumorphicCard(modifier = Modifier.fillMaxWidth(), elevation = 6.dp) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .neumorphicPressed(depth = 5.dp, borderRadius = 20.dp)
+            .padding(20.dp)
+    ) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Column {
                 Text("Net worth actuel", style = MaterialTheme.typography.labelSmall, color = NeumorphicTextSecondary)
@@ -527,7 +517,8 @@ private fun VacationBanner(ui: HomeUiState) {
 
 @Composable
 private fun ProjectionCard(label: String, amount: BigDecimal, modifier: Modifier = Modifier) {
-    NeumorphicCard(modifier = modifier, elevation = 5.dp) {
+    // À plat (contenu posé sur le fond)
+    Column(modifier = modifier.padding(horizontal = 10.dp, vertical = 4.dp)) {
         Text(label, style = MaterialTheme.typography.labelMedium, color = NeumorphicTextSecondary)
         Spacer(Modifier.height(4.dp))
         CurrencyAmount(
@@ -536,4 +527,33 @@ private fun ProjectionCard(label: String, amount: BigDecimal, modifier: Modifier
             color = if (amount >= BigDecimal.ZERO) IncomeColor else ExpenseColor
         )
     }
+}
+
+/** Statistique à plat (label + montant), pour les rangées Revenus/Dépenses/Net. */
+@Composable
+private fun FlatStat(title: String, amount: BigDecimal, amountColor: Color?, modifier: Modifier = Modifier) {
+    Column(modifier = modifier.padding(horizontal = 10.dp, vertical = 2.dp)) {
+        Text(
+            title,
+            style = MaterialTheme.typography.labelMedium,
+            color = NeumorphicTextTertiary
+        )
+        Spacer(Modifier.height(6.dp))
+        CurrencyAmount(
+            amount = amount,
+            style = MaterialTheme.typography.titleLarge,
+            color = amountColor
+        )
+    }
+}
+
+/** Fin filet vertical de séparation entre stats à plat. */
+@Composable
+private fun StatDivider() {
+    Box(
+        Modifier
+            .width(1.dp)
+            .height(38.dp)
+            .background(NeumorphicTextTertiary.copy(alpha = 0.28f))
+    )
 }
