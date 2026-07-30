@@ -1,17 +1,31 @@
 package com.budgetmanager.presentation.screens.home
 
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -20,30 +34,43 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.hoverable
-import androidx.compose.ui.draw.clip
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.budgetmanager.domain.model.Account
 import com.budgetmanager.domain.model.Transaction
 import com.budgetmanager.domain.model.TransactionType
-import com.budgetmanager.presentation.components.*
 import com.budgetmanager.presentation.navigation.NavigationState
 import com.budgetmanager.presentation.navigation.Screen
-import com.budgetmanager.presentation.theme.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import org.koin.core.context.GlobalContext.get as getKoin
 import java.math.BigDecimal
-import java.time.LocalDateTime
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
+
+// ============================================================================
+// Charte "Émeraude Tech" (thème clair, futuriste). Local à l'Accueil pour l'instant.
+// ============================================================================
+private val EmBg = Color(0xFFF1F5F3)
+private val EmPanel = Color(0xFFFFFFFF)
+private val EmBorder = Color(0xFFE1E7E4)
+private val EmFg = Color(0xFF0C1512)
+private val EmMuted = Color(0xFF5B6B65)
+private val EmMuted2 = Color(0xFF94A39C)
+private val EmAccent = Color(0xFF0FB985)
+private val EmAccent2 = Color(0xFF06D6C4)
+private val EmBright = Color(0xFF12E6A0)
+private val EmRed = Color(0xFFF43F5E)
+private val Mono = FontFamily.Monospace
 
 data class HomeUiState(
     val totalBalance: BigDecimal = BigDecimal.ZERO,
@@ -52,17 +79,13 @@ data class HomeUiState(
     val recentTransactions: List<Transaction> = emptyList(),
     val accounts: List<Account> = emptyList(),
     val isLoading: Boolean = true,
-    /** Net worth history: list of (yearMonth label, total balance) for last 12 months. */
     val netWorthHistory: List<Pair<String, BigDecimal>> = emptyList(),
-    /** Séries mensuelles (7 derniers mois, ancien→récent) pour les mini-courbes du trio. */
     val incomeSeries: List<Float> = emptyList(),
     val expenseSeries: List<Float> = emptyList(),
     val netSeries: List<Float> = emptyList(),
-    /** Projected balance in 1, 3, 6 months at current spend rate. */
     val projection1Month: BigDecimal = BigDecimal.ZERO,
     val projection3Months: BigDecimal = BigDecimal.ZERO,
     val projection6Months: BigDecimal = BigDecimal.ZERO,
-    /** Vacation mode info */
     val vacationActive: Boolean = false,
     val vacationDaysRemaining: Long? = null,
     val vacationSpent: BigDecimal = BigDecimal.ZERO,
@@ -75,9 +98,7 @@ class HomeScreenState {
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    init {
-        loadData()
-    }
+    init { loadData() }
 
     private fun loadData() {
         scope.launch {
@@ -86,54 +107,40 @@ class HomeScreenState {
                 val accountRepo = koin.get<com.budgetmanager.data.repository.AccountRepository>()
                 val transactionRepo = koin.get<com.budgetmanager.data.repository.TransactionRepository>()
 
-                // Collect accounts for total balance (multi-currency aware)
                 launch {
                     val rateRepo = koin.get<com.budgetmanager.data.repository.ExchangeRateRepository>()
                     val appPrefs = koin.get<com.budgetmanager.data.preferences.AppPreferences>()
                     accountRepo.getAllAccounts().collectLatest { accounts ->
                         val mainCurrency = appPrefs.currencyCode
-                        // Convert each account balance to the main currency
                         val totalBalance = accounts.fold(BigDecimal.ZERO) { acc, a ->
                             val converted = if (a.currencyCode.equals(mainCurrency, true)) a.balance
                                 else rateRepo.convert(a.balance, a.currencyCode, mainCurrency)
                             acc.add(converted)
                         }
-                        uiState = uiState.copy(
-                            accounts = accounts,
-                            totalBalance = totalBalance,
-                            isLoading = false
-                        )
+                        uiState = uiState.copy(accounts = accounts, totalBalance = totalBalance, isLoading = false)
                     }
                 }
 
-                // Collect current month transactions
                 launch {
                     val now = YearMonth.now()
                     val start = now.atDay(1).atStartOfDay()
                     val end = now.atEndOfMonth().atTime(23, 59, 59)
                     transactionRepo.getTransactionsByDateRange(start, end).collectLatest { transactions ->
-                        val income = transactions
-                            .filter { it.transactionType == TransactionType.INCOME }
+                        val income = transactions.filter { it.transactionType == TransactionType.INCOME }
                             .fold(BigDecimal.ZERO) { acc, t -> acc.add(t.amount) }
-                        val expenses = transactions
-                            .filter { it.transactionType == TransactionType.EXPENSE }
+                        val expenses = transactions.filter { it.transactionType == TransactionType.EXPENSE }
                             .fold(BigDecimal.ZERO) { acc, t -> acc.add(t.amount) }
-
-                        // Take most recent 10 for display
                         uiState = uiState.copy(
                             recentTransactions = transactions.take(10),
                             monthlyIncome = income,
                             monthlyExpenses = expenses
                         )
-
-                        // Compute projections based on current month rate
                         val net = income.subtract(expenses)
                         val daysElapsed = java.time.LocalDate.now().dayOfMonth.coerceAtLeast(1)
                         val daysInMonth = java.time.LocalDate.now().lengthOfMonth()
                         val dailyNet = net.divide(java.math.BigDecimal(daysElapsed), 4, java.math.RoundingMode.HALF_UP)
                         val totalBalance = uiState.totalBalance
                         val projectedMonthlyNet = dailyNet.multiply(java.math.BigDecimal(daysInMonth))
-
                         uiState = uiState.copy(
                             projection1Month = totalBalance.add(projectedMonthlyNet),
                             projection3Months = totalBalance.add(projectedMonthlyNet.multiply(java.math.BigDecimal(3))),
@@ -142,7 +149,6 @@ class HomeScreenState {
                     }
                 }
 
-                // Vacation summary (multi-currency aware: converts to main currency)
                 launch {
                     val appPrefs = koin.get<com.budgetmanager.data.preferences.AppPreferences>()
                     val rateRepo = koin.get<com.budgetmanager.data.repository.ExchangeRateRepository>()
@@ -152,19 +158,13 @@ class HomeScreenState {
                         val end = com.budgetmanager.util.VacationMode.endDate(appPrefs)!!
                         val vacTag = appPrefs.vacationTag.lowercase()
                         val mainCurrency = appPrefs.currencyCode
-                        val accountCurrencies = accountRepo.getAllAccounts().first()
-                            .associate { it.id to it.currencyCode }
-
-                        val matchingTxs = transactionRepo.getAllTransactions().first()
-                            .filter {
-                                it.transactionType == TransactionType.EXPENSE &&
-                                !it.date.toLocalDate().isBefore(start) &&
-                                !it.date.toLocalDate().isAfter(end) &&
-                                (it.tags.any { t -> t.equals(vacTag, true) } ||
-                                 // Or just any expense in the period if no tag yet
-                                 vacTag.isBlank())
-                            }
-
+                        val accountCurrencies = accountRepo.getAllAccounts().first().associate { it.id to it.currencyCode }
+                        val matchingTxs = transactionRepo.getAllTransactions().first().filter {
+                            it.transactionType == TransactionType.EXPENSE &&
+                            !it.date.toLocalDate().isBefore(start) &&
+                            !it.date.toLocalDate().isAfter(end) &&
+                            (it.tags.any { t -> t.equals(vacTag, true) } || vacTag.isBlank())
+                        }
                         var spent = BigDecimal.ZERO
                         for (tx in matchingTxs) {
                             val cur = accountCurrencies[tx.accountId] ?: mainCurrency
@@ -183,17 +183,13 @@ class HomeScreenState {
                     }
                 }
 
-                // Net worth history — all transactions to compute past balances
                 launch {
                     transactionRepo.getAllTransactions().collectLatest { allTxs ->
-                        // For each of the last 12 months, compute net worth at month end
                         val now = java.time.YearMonth.now()
                         val totalBalance = uiState.totalBalance
-                        // Compute transaction net for months AFTER each target month, then back-calc
                         val history = (11 downTo 0).map { offset ->
                             val targetMonth = now.minusMonths(offset.toLong())
                             val targetMonthEnd = targetMonth.atEndOfMonth()
-                            // Sum all transactions strictly after target month end
                             val futureTxs = allTxs.filter { it.date.toLocalDate().isAfter(targetMonthEnd) }
                             val futureNet = futureTxs.fold(BigDecimal.ZERO) { acc, t ->
                                 when (t.transactionType) {
@@ -202,14 +198,11 @@ class HomeScreenState {
                                     TransactionType.TRANSFER -> acc
                                 }
                             }
-                            // Net worth at target month = current balance - future net
                             val nw = totalBalance.subtract(futureNet)
-                            val label = targetMonth.format(java.time.format.DateTimeFormatter.ofPattern("MMM", java.util.Locale.FRANCE))
+                            val label = targetMonth.format(DateTimeFormatter.ofPattern("MMM", java.util.Locale.FRANCE))
                                 .replaceFirstChar { it.uppercaseChar() }
                             label to nw
                         }
-
-                        // Séries mensuelles (7 derniers mois) pour les mini-courbes
                         val monthsList = (6 downTo 0).map { now.minusMonths(it.toLong()) }
                         fun monthlySum(ym: java.time.YearMonth, type: TransactionType): Float =
                             allTxs.filter { it.transactionType == type && java.time.YearMonth.from(it.date) == ym }
@@ -217,7 +210,6 @@ class HomeScreenState {
                         val incSeries = monthsList.map { monthlySum(it, TransactionType.INCOME) }
                         val expSeries = monthsList.map { monthlySum(it, TransactionType.EXPENSE) }
                         val netSer = incSeries.zip(expSeries) { i, e -> i - e }
-
                         uiState = uiState.copy(
                             netWorthHistory = history,
                             incomeSeries = incSeries,
@@ -232,370 +224,333 @@ class HomeScreenState {
         }
     }
 
-    fun dispose() {
-        scope.cancel()
-    }
+    fun dispose() { scope.cancel() }
 }
 
 @Composable
 fun HomeScreen(navigationState: NavigationState) {
     val state = remember { HomeScreenState() }
     DisposableEffect(Unit) { onDispose { state.dispose() } }
-
     val ui = state.uiState
     val dateFormatter = remember { DateTimeFormatter.ofPattern("dd/MM/yyyy") }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-    ) {
-            // Page header
-            SectionHeader(title = "Tableau de bord")
-            Spacer(Modifier.height(12.dp))
+    Box(Modifier.fillMaxSize().background(EmBg)) {
+        AuroraBackground(Modifier.matchParentSize())
 
-            // Vacation banner
-            if (ui.vacationActive) {
-                VacationBanner(ui)
-                Spacer(Modifier.height(12.dp))
-            }
-
-            // Total balance card - cliquable → Nouveau compte
-            val balanceCardInteraction = remember { MutableInteractionSource() }
-            val balanceCardHovered by balanceCardInteraction.collectIsHoveredAsState()
-
-            NeumorphicCard(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .pointerHoverIcon(PointerIcon.Hand)
-                    .hoverable(balanceCardInteraction)
-                    .clickable(
-                        interactionSource = balanceCardInteraction,
-                        indication = null
-                    ) { navigationState.navigateToNewAccount() },
-                elevation = if (balanceCardHovered) 12.dp else 10.dp,
-                borderRadius = 20.dp
-            ) {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = "Solde total",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = NeumorphicTextSecondary
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    CurrencyAmount(
-                        amount = ui.totalBalance,
-                        style = MaterialTheme.typography.displayLarge
-                    )
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 18.dp, vertical = 16.dp)
+        ) {
+            Appear(0) {
+                Column {
+                    Text("Tableau de bord", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = EmFg, letterSpacing = (-0.5).sp)
                     Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = "${ui.accounts.size} compte(s) actif(s)",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = NeumorphicTextTertiary
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    NetChip(ui.monthlyIncome.subtract(ui.monthlyExpenses))
-                    Spacer(Modifier.height(12.dp))
-                    // Hint visuel
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Add,
-                            contentDescription = null,
-                            tint = if (balanceCardHovered) NeumorphicPrimary else NeumorphicTextTertiary,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            text = "Ajouter un compte",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (balanceCardHovered) NeumorphicPrimary else NeumorphicTextTertiary
-                        )
-                    }
+                    Text("Ton aperçu financier", fontSize = 13.sp, color = EmMuted)
                 }
             }
+            Spacer(Modifier.height(24.dp))
 
-            Spacer(Modifier.height(32.dp))
-
-            // Income / Expenses / Net — cartes neumorphiques avec mini-courbe + badge de tendance
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                StatCard("Revenus du mois", ui.monthlyIncome, IncomeColor, ui.incomeSeries, IncomeColor, Modifier.weight(1f))
-                StatCard("Dépenses du mois", ui.monthlyExpenses, ExpenseColor, ui.expenseSeries, ExpenseColor, Modifier.weight(1f))
-                StatCard("Net du mois", ui.monthlyIncome.subtract(ui.monthlyExpenses), null, ui.netSeries, NeumorphicPrimary, Modifier.weight(1f))
+            if (ui.vacationActive) {
+                Appear(40) { VacationBanner(ui) }
+                Spacer(Modifier.height(16.dp))
             }
 
-            Spacer(Modifier.height(32.dp))
+            // Solde (héro)
+            Appear(60) { HeroCard(ui, navigationState) }
+            Spacer(Modifier.height(16.dp))
 
-            // Quick actions
-            SectionHeader(title = "Actions rapides")
-            Spacer(Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                NeumorphicButton(
-                    text = "Nouvelle transaction",
-                    icon = Icons.Filled.Add,
-                    onClick = { navigationState.navigateTo(Screen.ADD_TRANSACTION) },
-                    modifier = Modifier.weight(1f)
-                )
-                NeumorphicButton(
-                    text = "Transfert",
-                    icon = Icons.Filled.SwapHoriz,
-                    onClick = { navigationState.navigateTo(Screen.TRANSFER) },
-                    isPrimary = false,
-                    modifier = Modifier.weight(1f)
-                )
-                NeumorphicButton(
-                    text = "Récurrents",
-                    icon = Icons.Filled.Repeat,
-                    onClick = { navigationState.navigateTo(Screen.RECURRING) },
-                    isPrimary = false,
-                    modifier = Modifier.weight(1f)
-                )
-                NeumorphicButton(
-                    text = "Statistiques",
-                    icon = Icons.Filled.BarChart,
-                    onClick = { navigationState.navigateTo(Screen.ANALYTICS) },
-                    isPrimary = false,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            Spacer(Modifier.height(32.dp))
-
-            // Net worth evolution + projections
-            if (ui.netWorthHistory.isNotEmpty()) {
-                SectionHeader(title = "Patrimoine - 12 mois")
-                Spacer(Modifier.height(8.dp))
-                NetWorthChart(ui.netWorthHistory)
-                Spacer(Modifier.height(28.dp))
-            }
-
-            // Projections
-            if (ui.monthlyIncome > BigDecimal.ZERO || ui.monthlyExpenses > BigDecimal.ZERO) {
-                SectionHeader(title = "Projection (au rythme actuel)")
-                Spacer(Modifier.height(8.dp))
-                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    ProjectionCard("Dans 1 mois", ui.projection1Month, modifier = Modifier.weight(1f))
-                    StatDivider()
-                    ProjectionCard("Dans 3 mois", ui.projection3Months, modifier = Modifier.weight(1f))
-                    StatDivider()
-                    ProjectionCard("Dans 6 mois", ui.projection6Months, modifier = Modifier.weight(1f))
+            // Trio
+            Appear(120) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    StatCard("Revenus", ui.monthlyIncome, EmAccent, ui.incomeSeries, EmAccent, Icons.Filled.SouthWest, Modifier.weight(1f))
+                    StatCard("Dépenses", ui.monthlyExpenses, EmFg, ui.expenseSeries, EmRed, Icons.Filled.NorthEast, Modifier.weight(1f))
+                    StatCard("Net du mois", ui.monthlyIncome.subtract(ui.monthlyExpenses), EmFg, ui.netSeries, EmAccent2, Icons.Filled.ShowChart, Modifier.weight(1f))
                 }
-                Spacer(Modifier.height(28.dp))
             }
+            Spacer(Modifier.height(22.dp))
 
-            // Recent transactions
-            SectionHeader(
-                title = "Transactions récentes",
-                actionText = "Voir tout",
-                onAction = { navigationState.navigateTo(Screen.TRANSACTIONS) }
-            )
-            Spacer(Modifier.height(8.dp))
+            // Actions
+            Appear(180) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    TechButton("Nouvelle transaction", Icons.Filled.Add, primary = true, modifier = Modifier.weight(1f)) { navigationState.navigateTo(Screen.ADD_TRANSACTION) }
+                    TechButton("Transfert", Icons.Filled.SwapHoriz, primary = false, modifier = Modifier.weight(1f)) { navigationState.navigateTo(Screen.TRANSFER) }
+                    TechButton("Récurrents", Icons.Filled.Repeat, primary = false, modifier = Modifier.weight(1f)) { navigationState.navigateTo(Screen.RECURRING) }
+                    TechButton("Analyser", Icons.Filled.BarChart, primary = false, modifier = Modifier.weight(1f)) { navigationState.navigateTo(Screen.ANALYTICS) }
+                }
+            }
+            Spacer(Modifier.height(22.dp))
 
-            if (ui.recentTransactions.isEmpty() && !ui.isLoading) {
-                EmptyState(
-                    message = "Aucune transaction enregistrée.\nCommencez par ajouter une transaction !",
-                    icon = Icons.Filled.ReceiptLong,
-                    actionText = "Ajouter une transaction",
-                    onAction = { navigationState.navigateTo(Screen.ADD_TRANSACTION) }
-                )
-            } else {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    ui.recentTransactions.forEachIndexed { index, tx ->
-                        TransactionItem(
-                            title = tx.title,
-                            amount = if (tx.transactionType == TransactionType.EXPENSE) tx.amount.negate() else tx.amount,
-                            category = tx.categoryName,
-                            date = tx.date.format(dateFormatter),
-                            isIncome = tx.transactionType == TransactionType.INCOME,
-                            categoryColor = parseColor(tx.categoryColor),
-                            onClick = { navigationState.navigateToEditTransaction(tx.id) }
-                        )
-                        if (index < ui.recentTransactions.lastIndex) {
-                            HorizontalDivider(
-                                modifier = Modifier.padding(horizontal = 16.dp),
-                                color = NeumorphicTextTertiary.copy(alpha = 0.3f)
-                            )
+            // Patrimoine + Projection
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                if (ui.netWorthHistory.isNotEmpty()) {
+                    Appear(240, Modifier.weight(1.6f)) { NetWorthChart(ui.netWorthHistory) }
+                }
+                if (ui.monthlyIncome > BigDecimal.ZERO || ui.monthlyExpenses > BigDecimal.ZERO) {
+                    Appear(280, Modifier.weight(1f)) {
+                        TechCard(Modifier.fillMaxWidth()) {
+                            Lab("// Projection")
+                            Text("au rythme actuel", fontSize = 11.sp, color = EmMuted2)
+                            Spacer(Modifier.height(16.dp))
+                            ProjectionRow("1 mois", ui.projection1Month)
+                            Spacer(Modifier.height(12.dp))
+                            ProjectionRow("3 mois", ui.projection3Months)
+                            Spacer(Modifier.height(12.dp))
+                            ProjectionRow("6 mois", ui.projection6Months)
                         }
                     }
                 }
             }
+            Spacer(Modifier.height(16.dp))
 
-            Spacer(Modifier.height(32.dp))
+            // Transactions
+            Appear(340) {
+                TechCard(Modifier.fillMaxWidth()) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text("Transactions récentes", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = EmFg)
+                        Text("Voir tout →", fontSize = 12.sp, color = EmMuted,
+                            modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { navigationState.navigateTo(Screen.TRANSACTIONS) }.padding(4.dp))
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    if (ui.recentTransactions.isEmpty()) {
+                        Text(if (ui.isLoading) "Chargement…" else "Aucune transaction ce mois-ci.", fontSize = 13.sp, color = EmMuted2, modifier = Modifier.padding(vertical = 14.dp))
+                    } else {
+                        ui.recentTransactions.forEachIndexed { i, tx ->
+                            TxnRow(tx, dateFormatter) { navigationState.navigateToEditTransaction(tx.id) }
+                            if (i < ui.recentTransactions.lastIndex) Box(Modifier.fillMaxWidth().height(1.dp).background(EmBorder))
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(30.dp))
+        }
+    }
+}
+
+// ===================== Fond aurora =====================
+
+@Composable
+private fun AuroraBackground(modifier: Modifier) {
+    Canvas(modifier) {
+        // halos aurora
+        drawRect(Brush.radialGradient(
+            listOf(EmAccent.copy(alpha = 0.13f), Color.Transparent),
+            center = Offset(size.width * 0.9f, 0f), radius = size.minDimension * 0.7f
+        ))
+        drawRect(Brush.radialGradient(
+            listOf(EmAccent2.copy(alpha = 0.12f), Color.Transparent),
+            center = Offset(0f, size.height), radius = size.minDimension * 0.7f
+        ))
+        // grille de points discrète
+        val step = 30.dp.toPx()
+        val dot = EmFg.copy(alpha = 0.04f)
+        var y = 0f
+        while (y < size.height) {
+            var x = 0f
+            while (x < size.width) { drawCircle(dot, radius = 1f, center = Offset(x, y)); x += step }
+            y += step
+        }
+    }
+}
+
+// ===================== Composants =====================
+
+@Composable
+private fun Appear(delayMillis: Int, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    var shown by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { delay(delayMillis.toLong()); shown = true }
+    val alpha by animateFloatAsState(if (shown) 1f else 0f, tween(500), label = "a")
+    val dy by animateFloatAsState(if (shown) 0f else 14f, tween(500), label = "y")
+    Box(modifier.graphicsLayer { this.alpha = alpha; translationY = dy.dp.toPx() }) { content() }
+}
+
+@Composable
+private fun Lab(text: String) {
+    Text(text, fontFamily = Mono, fontSize = 11.sp, letterSpacing = 2.sp, color = EmMuted2, fontWeight = FontWeight.SemiBold)
+}
+
+/** Carte tech : blanc, bordure fine, coins doux ; survol = bordure émeraude + glow. */
+@Composable
+private fun TechCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val border = if (hovered) EmAccent.copy(alpha = 0.55f) else EmBorder
+    Column(
+        modifier
+            .hoverable(interaction)
+            .then(if (hovered) Modifier.shadow(14.dp, RoundedCornerShape(18.dp), ambientColor = EmAccent, spotColor = EmAccent) else Modifier)
+            .clip(RoundedCornerShape(18.dp))
+            .background(EmPanel)
+            .border(1.dp, border, RoundedCornerShape(18.dp))
+            .padding(20.dp),
+        content = content
+    )
+}
+
+@Composable
+private fun HeroCard(ui: HomeUiState, navigationState: NavigationState) {
+    val interaction = remember { MutableInteractionSource() }
+    Box(
+        Modifier.fillMaxWidth()
+            .shadow(18.dp, RoundedCornerShape(18.dp), ambientColor = EmAccent, spotColor = EmAccent)
+            .clip(RoundedCornerShape(18.dp))
+            .background(EmPanel)
+            .border(1.dp, EmAccent.copy(alpha = 0.25f), RoundedCornerShape(18.dp))
+            .pointerHoverIcon(PointerIcon.Hand)
+            .clickable(interaction, null) { navigationState.navigateToNewAccount() }
+            .padding(22.dp)
+    ) {
+        // barre d'accent gauche
+        Box(Modifier.align(Alignment.CenterStart).width(4.dp).height(64.dp).clip(RoundedCornerShape(4.dp))
+            .background(Brush.verticalGradient(listOf(EmAccent, EmAccent2))))
+        Column(Modifier.padding(start = 14.dp)) {
+            Lab("// Solde total")
+            Spacer(Modifier.height(10.dp))
+            AmountMono(ui.totalBalance, 34.sp, brush = Brush.linearGradient(listOf(EmFg, EmAccent, EmAccent2)))
+            Spacer(Modifier.height(10.dp))
+            val net = ui.monthlyIncome.subtract(ui.monthlyExpenses)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    (if (net >= BigDecimal.ZERO) "▲ +" else "▼ ") + String.format(java.util.Locale.FRANCE, "%,.0f €", net.abs()),
+                    fontFamily = Mono, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (net >= BigDecimal.ZERO) EmAccent else EmRed
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("ce mois · ${ui.accounts.size} comptes actifs", fontSize = 12.sp, color = EmMuted)
+            }
+        }
     }
 }
 
 @Composable
-private fun NetWorthChart(history: List<Pair<String, BigDecimal>>) {
-    val maxValue = history.maxOfOrNull { it.second.toFloat() } ?: 1f
-    val minValue = history.minOfOrNull { it.second.toFloat() } ?: 0f
-    val range = (maxValue - minValue).coerceAtLeast(1f)
-    val current = history.lastOrNull()?.second ?: BigDecimal.ZERO
-    val firstValue = history.firstOrNull()?.second ?: BigDecimal.ZERO
-    val totalChange = current.subtract(firstValue)
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .neumorphicPressed(depth = 5.dp, borderRadius = 20.dp)
-            .padding(20.dp)
-    ) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Column {
-                Text("Net worth actuel", style = MaterialTheme.typography.labelSmall, color = NeumorphicTextSecondary)
-                CurrencyAmount(amount = current, style = MaterialTheme.typography.headlineMedium)
+private fun StatCard(
+    label: String, amount: BigDecimal, amountColor: Color,
+    series: List<Float>, sparkColor: Color,
+    icon: androidx.compose.ui.graphics.vector.ImageVector, modifier: Modifier = Modifier
+) {
+    TechCard(modifier) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(34.dp).clip(RoundedCornerShape(11.dp)).border(1.dp, EmBorder, RoundedCornerShape(11.dp)), contentAlignment = Alignment.Center) {
+                Icon(icon, null, tint = EmMuted, modifier = Modifier.size(16.dp))
             }
-            Column(horizontalAlignment = Alignment.End) {
-                Text("12 mois", style = MaterialTheme.typography.labelSmall, color = NeumorphicTextSecondary)
-                Text(
-                    if (totalChange >= BigDecimal.ZERO) "+ ${String.format("%.0f", totalChange)} EUR"
-                    else "- ${String.format("%.0f", totalChange.abs())} EUR",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = if (totalChange >= BigDecimal.ZERO) IncomeColor else ExpenseColor,
-                    fontWeight = FontWeight.Bold
-                )
-            }
+            if (series.size >= 2) Sparkline(series, sparkColor, Modifier.width(60.dp).height(28.dp))
         }
-        Spacer(Modifier.height(16.dp))
-        val primaryColor = NeumorphicPrimary
-        val gridColor = NeumorphicTextTertiary.copy(alpha = 0.20f)
-        val chartValues = history.map { it.second.toFloat() }
-        Canvas(modifier = Modifier.fillMaxWidth().height(130.dp)) {
-            if (chartValues.size < 2) return@Canvas
-            val minV = chartValues.minOrNull() ?: 0f
-            val maxV = chartValues.maxOrNull() ?: 0f
-            val rng = (maxV - minV).coerceAtLeast(0.01f)
-            val padY = size.height * 0.16f
-            val padX = 6.dp.toPx()
-            val stepX = (size.width - padX * 2) / (chartValues.size - 1)
-            val pts = chartValues.mapIndexed { i, v ->
-                Offset(padX + i * stepX, size.height - padY - ((v - minV) / rng) * (size.height - padY * 2))
-            }
-            val dash = PathEffect.dashPathEffect(floatArrayOf(2f, 8f), 0f)
-            for (g in 1..3) {
-                val y = size.height / 4f * g
-                drawLine(gridColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f, pathEffect = dash)
-            }
-            drawPath(
-                buildSmooth(pts, true, size.height),
-                Brush.verticalGradient(listOf(primaryColor.copy(alpha = 0.30f), primaryColor.copy(alpha = 0f)))
-            )
-            val line = buildSmooth(pts, false, 0f)
-            drawPath(line, primaryColor.copy(alpha = 0.18f), style = Stroke(7.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
-            drawPath(line, primaryColor, style = Stroke(3.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
-            drawCircle(primaryColor, radius = 4.5.dp.toPx(), center = pts.last())
-        }
+        Spacer(Modifier.height(12.dp))
+        AmountMono(amount, 22.sp, color = amountColor, weight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-            history.forEach { (label, _) ->
-                Text(
-                    label,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = NeumorphicTextTertiary,
-                    modifier = Modifier.weight(1f),
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    maxLines = 1
-                )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (series.size >= 2) {
+                val prev = series[series.size - 2]; val delta = series.last() - prev
+                val pct = if (kotlin.math.abs(prev) > 0.01f) "${(kotlin.math.abs(delta / prev) * 100).toInt()}%" else "—"
+                Badge((if (delta >= 0f) "▲ " else "▼ ") + pct, delta >= 0f)
+                Spacer(Modifier.width(8.dp))
             }
+            Lab(label)
         }
+    }
+}
+
+@Composable
+private fun Badge(text: String, positive: Boolean) {
+    val c = if (positive) EmAccent else EmRed
+    Box(Modifier.clip(RoundedCornerShape(999.dp)).background(c.copy(alpha = 0.13f)).padding(horizontal = 9.dp, vertical = 3.dp)) {
+        Text(text, fontFamily = Mono, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = c)
+    }
+}
+
+@Composable
+private fun TechButton(text: String, icon: androidx.compose.ui.graphics.vector.ImageVector, primary: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val shape = RoundedCornerShape(14.dp)
+    val base = if (primary) Modifier
+        .then(if (hovered) Modifier.shadow(16.dp, shape, ambientColor = EmAccent, spotColor = EmAccent) else Modifier.shadow(8.dp, shape, ambientColor = EmAccent, spotColor = EmAccent))
+        .clip(shape).background(Brush.linearGradient(listOf(EmAccent, EmAccent2)))
+    else Modifier.clip(shape).background(EmPanel).border(1.dp, if (hovered) EmAccent.copy(alpha = 0.6f) else EmBorder, shape)
+    Row(
+        modifier.height(44.dp).then(base)
+            .pointerHoverIcon(PointerIcon.Hand).hoverable(interaction)
+            .clickable(interaction, null, onClick = onClick)
+            .padding(horizontal = 14.dp),
+        horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, null, tint = if (primary) Color(0xFF04140E) else EmFg, modifier = Modifier.size(17.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = if (primary) Color(0xFF04140E) else EmFg, maxLines = 1)
+    }
+}
+
+@Composable
+private fun ProjectionRow(label: String, amount: BigDecimal) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Text(label, fontFamily = Mono, fontSize = 12.sp, color = EmMuted2)
+        AmountMono(amount, 15.sp, color = if (amount >= BigDecimal.ZERO) EmFg else EmRed, weight = FontWeight.SemiBold, animated = false)
+    }
+}
+
+@Composable
+private fun TxnRow(tx: Transaction, dateFormatter: DateTimeFormatter, onClick: () -> Unit) {
+    val isIncome = tx.transactionType == TransactionType.INCOME
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable(onClick = onClick).padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.size(38.dp).clip(RoundedCornerShape(12.dp)).border(1.dp, EmBorder, RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+            Icon(if (isIncome) Icons.Filled.SouthWest else Icons.Filled.NorthEast, null, tint = if (isIncome) EmAccent else EmMuted, modifier = Modifier.size(16.dp))
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(tx.title, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = EmFg, maxLines = 1)
+            Text((tx.categoryName ?: "Sans catégorie") + " · " + tx.date.format(dateFormatter), fontSize = 12.sp, color = EmMuted2, maxLines = 1)
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(
+            (if (isIncome) "+" else "−") + String.format(java.util.Locale.FRANCE, "%,.2f €", tx.amount),
+            fontFamily = Mono, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = if (isIncome) EmAccent else EmFg
+        )
     }
 }
 
 @Composable
 private fun VacationBanner(ui: HomeUiState) {
-    val daysLeft = ui.vacationDaysRemaining
-    val hasBudget = ui.vacationBudget > BigDecimal.ZERO
-    val pct = if (hasBudget) (ui.vacationSpent.toDouble() / ui.vacationBudget.toDouble()).coerceAtLeast(0.0) else 0.0
-
-    NeumorphicCard(modifier = Modifier.fillMaxWidth(), elevation = 6.dp, backgroundColor = TransferColor.copy(alpha = 0.08f)) {
+    TechCard(Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Filled.BeachAccess, null, tint = TransferColor, modifier = Modifier.size(28.dp))
+            Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(EmAccent.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.BeachAccess, null, tint = EmAccent, modifier = Modifier.size(20.dp))
+            }
             Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
+            Column(Modifier.weight(1f)) {
+                Text("Mode vacances" + (ui.vacationDaysRemaining?.let { " · $it j restants" } ?: ""), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = EmFg)
                 Text(
-                    "Mode vacances actif" + (daysLeft?.let { " · $it jour(s) restants" } ?: ""),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = TransferColor
-                )
-                Text(
-                    if (hasBudget)
-                        "Depense ${String.format("%.0f", ui.vacationSpent)} / ${String.format("%.0f", ui.vacationBudget)} EUR (${(pct * 100).toInt()}%)"
-                    else
-                        "Depense vacances : ${String.format("%.0f", ui.vacationSpent)} EUR",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = NeumorphicTextSecondary
+                    String.format(java.util.Locale.FRANCE, "Dépensé %,.0f €", ui.vacationSpent) +
+                        (if (ui.vacationBudget > BigDecimal.ZERO) String.format(java.util.Locale.FRANCE, " / %,.0f €", ui.vacationBudget) else ""),
+                    fontSize = 12.sp, color = EmMuted2
                 )
             }
         }
-        if (hasBudget) {
-            Spacer(Modifier.height(8.dp))
-            BudgetProgressBar(
-                spent = ui.vacationSpent.toFloat(),
-                limit = ui.vacationBudget.toFloat(),
-                showLabel = false
-            )
-        }
     }
 }
 
+/** Montant en typo mono, animé (compteur) au premier affichage. */
 @Composable
-private fun ProjectionCard(label: String, amount: BigDecimal, modifier: Modifier = Modifier) {
-    // À plat (contenu posé sur le fond)
-    Column(modifier = modifier.padding(horizontal = 10.dp, vertical = 4.dp)) {
-        Text(label, style = MaterialTheme.typography.labelMedium, color = NeumorphicTextSecondary)
-        Spacer(Modifier.height(4.dp))
-        CurrencyAmount(
-            amount = amount,
-            style = MaterialTheme.typography.titleLarge,
-            color = if (amount >= BigDecimal.ZERO) IncomeColor else ExpenseColor
-        )
-    }
+private fun AmountMono(
+    amount: BigDecimal, fontSize: TextUnit, brush: Brush? = null, color: Color = EmFg,
+    weight: FontWeight = FontWeight.Bold, animated: Boolean = true
+) {
+    val target = amount.toFloat()
+    var started by remember { mutableStateOf(!animated) }
+    LaunchedEffect(target) { started = true }
+    val v by animateFloatAsState(if (started) target else 0f, tween(1100), label = "amt")
+    val shown = if (animated) v else target
+    val style = if (brush != null)
+        TextStyle(brush = brush, fontFamily = Mono, fontWeight = weight, fontSize = fontSize)
+    else
+        TextStyle(color = color, fontFamily = Mono, fontWeight = weight, fontSize = fontSize)
+    Text(String.format(java.util.Locale.FRANCE, "%,.2f €", shown), style = style, maxLines = 1)
 }
 
-/** Statistique à plat (label + montant), pour les rangées Revenus/Dépenses/Net. */
-@Composable
-private fun FlatStat(title: String, amount: BigDecimal, amountColor: Color?, modifier: Modifier = Modifier) {
-    Column(modifier = modifier.padding(horizontal = 10.dp, vertical = 2.dp)) {
-        Text(
-            title,
-            style = MaterialTheme.typography.labelMedium,
-            color = NeumorphicTextTertiary
-        )
-        Spacer(Modifier.height(6.dp))
-        CurrencyAmount(
-            amount = amount,
-            style = MaterialTheme.typography.titleLarge,
-            color = amountColor
-        )
-    }
-}
+// ===================== Graphiques =====================
 
-/** Fin filet vertical de séparation entre stats à plat. */
-@Composable
-private fun StatDivider() {
-    Box(
-        Modifier
-            .width(1.dp)
-            .height(38.dp)
-            .background(NeumorphicTextTertiary.copy(alpha = 0.28f))
-    )
-}
-
-/**
- * Construit une courbe LISSE (Catmull-Rom → Bézier cubique) passant par [points].
- * [close] = true ferme l'aire jusqu'à [bottom] pour un remplissage dégradé.
- */
 private fun buildSmooth(points: List<Offset>, close: Boolean, bottom: Float): Path {
     val p = Path()
     if (points.isEmpty()) return p
@@ -612,7 +567,22 @@ private fun buildSmooth(points: List<Offset>, close: Boolean, bottom: Float): Pa
     return p
 }
 
-/** Mini-courbe LISSE lumineuse (aire dégradée + ligne + halo néon + point final). */
+/** Position interpolée le long d'une polyligne (t = 0..1). */
+private fun pointAlong(points: List<Offset>, t: Float): Offset {
+    if (points.size < 2) return points.firstOrNull() ?: Offset.Zero
+    val segLens = (0 until points.size - 1).map { (points[it + 1] - points[it]).getDistance() }
+    val total = segLens.sum().coerceAtLeast(0.001f)
+    var d = t.coerceIn(0f, 1f) * total
+    for (i in segLens.indices) {
+        if (d <= segLens[i]) {
+            val f = if (segLens[i] > 0f) d / segLens[i] else 0f
+            return Offset(points[i].x + (points[i + 1].x - points[i].x) * f, points[i].y + (points[i + 1].y - points[i].y) * f)
+        }
+        d -= segLens[i]
+    }
+    return points.last()
+}
+
 @Composable
 private fun Sparkline(values: List<Float>, color: Color, modifier: Modifier = Modifier) {
     Canvas(modifier) {
@@ -622,100 +592,69 @@ private fun Sparkline(values: List<Float>, color: Color, modifier: Modifier = Mo
         val range = (maxV - minV).coerceAtLeast(0.01f)
         val padY = size.height * 0.14f
         val stepX = size.width / (values.size - 1)
-        val points = values.mapIndexed { i, v ->
-            Offset(i * stepX, size.height - padY - ((v - minV) / range) * (size.height - padY * 2))
-        }
-        drawPath(buildSmooth(points, true, size.height),
-            Brush.verticalGradient(listOf(color.copy(alpha = 0.22f), color.copy(alpha = 0f))))
+        val points = values.mapIndexed { i, v -> Offset(i * stepX, size.height - padY - ((v - minV) / range) * (size.height - padY * 2)) }
+        drawPath(buildSmooth(points, true, size.height), Brush.verticalGradient(listOf(color.copy(alpha = 0.20f), color.copy(alpha = 0f))))
         val line = buildSmooth(points, false, 0f)
-        drawPath(line, color.copy(alpha = 0.18f), style = Stroke(6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
-        drawPath(line, color, style = Stroke(2.2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
-        drawCircle(color, radius = 2.8.dp.toPx(), center = points.last())
+        drawPath(line, color.copy(alpha = 0.20f), style = Stroke(5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawPath(line, color, style = Stroke(2f.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawCircle(color, radius = 2.4.dp.toPx(), center = points.last())
     }
 }
 
-/** Carte de statistique : label + mini-courbe, montant, badge de tendance. */
 @Composable
-private fun StatCard(
-    label: String,
-    amount: BigDecimal,
-    amountColor: Color?,
-    series: List<Float>,
-    sparkColor: Color,
-    modifier: Modifier = Modifier
-) {
-    NeumorphicCard(modifier = modifier, elevation = 6.dp, borderRadius = 18.dp) {
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                label.uppercase(),
-                style = MaterialTheme.typography.labelSmall,
-                color = NeumorphicTextTertiary,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1
+private fun NetWorthChart(history: List<Pair<String, BigDecimal>>) {
+    val current = history.lastOrNull()?.second ?: BigDecimal.ZERO
+    val firstValue = history.firstOrNull()?.second ?: BigDecimal.ZERO
+    val totalChange = current.subtract(firstValue)
+
+    // point de données qui circule
+    val infinite = rememberInfiniteTransition(label = "flow")
+    val flow by infinite.animateFloat(0f, 1f, infiniteRepeatable(tween(2800), RepeatMode.Restart), label = "flowT")
+
+    TechCard(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+            Column {
+                Lab("// Patrimoine")
+                Spacer(Modifier.height(6.dp))
+                AmountMono(current, 20.sp, color = EmFg, animated = false)
+            }
+            Badge(
+                (if (totalChange >= BigDecimal.ZERO) "▲ +" else "▼ ") + String.format(java.util.Locale.FRANCE, "%,.0f €", totalChange.abs()),
+                totalChange >= BigDecimal.ZERO
             )
-            if (series.size >= 2) {
-                Sparkline(series, sparkColor, Modifier.width(56.dp).height(24.dp))
+        }
+        Spacer(Modifier.height(14.dp))
+        val values = history.map { it.second.toFloat() }
+        Canvas(Modifier.fillMaxWidth().height(150.dp)) {
+            if (values.size < 2) return@Canvas
+            val minV = values.minOrNull() ?: 0f
+            val maxV = values.maxOrNull() ?: 0f
+            val rng = (maxV - minV).coerceAtLeast(0.01f)
+            val padY = size.height * 0.16f
+            val padX = 4.dp.toPx()
+            val stepX = (size.width - padX * 2) / (values.size - 1)
+            val pts = values.mapIndexed { i, v -> Offset(padX + i * stepX, size.height - padY - ((v - minV) / rng) * (size.height - padY * 2)) }
+            val dash = PathEffect.dashPathEffect(floatArrayOf(2f, 7f), 0f)
+            for (g in 1..3) {
+                val y = size.height / 4f * g
+                drawLine(EmBorder, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f, pathEffect = dash)
+            }
+            drawPath(buildSmooth(pts, true, size.height), Brush.verticalGradient(listOf(EmAccent.copy(alpha = 0.22f), EmAccent.copy(alpha = 0f))))
+            val line = buildSmooth(pts, false, 0f)
+            drawPath(line, EmAccent.copy(alpha = 0.20f), style = Stroke(7.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+            drawPath(line, EmBright, style = Stroke(2.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+            drawCircle(EmBright.copy(alpha = 0.18f), radius = 8.dp.toPx(), center = pts.last())
+            drawCircle(EmBright, radius = 4.dp.toPx(), center = pts.last())
+            // point qui circule le long de la courbe
+            val fp = pointAlong(pts, flow)
+            drawCircle(EmBright.copy(alpha = 0.25f), radius = 7.dp.toPx(), center = fp)
+            drawCircle(EmBright, radius = 3.dp.toPx(), center = fp)
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth()) {
+            history.forEach { (label, _) ->
+                Text(label, fontFamily = Mono, fontSize = 10.sp, color = EmMuted2, modifier = Modifier.weight(1f), textAlign = TextAlign.Center, maxLines = 1)
             }
         }
-        Spacer(Modifier.height(10.dp))
-        CurrencyAmount(amount = amount, style = MaterialTheme.typography.titleLarge, color = amountColor)
-        if (series.size >= 2) {
-            val prev = series[series.size - 2]
-            val last = series.last()
-            val delta = last - prev
-            val pctTxt = if (kotlin.math.abs(prev) > 0.01f)
-                "${(kotlin.math.abs(delta / prev) * 100).toInt()} %" else "—"
-            Spacer(Modifier.height(8.dp))
-            TrendPill(up = delta >= 0f, text = pctTxt, color = sparkColor)
-        }
-    }
-}
-
-/** Petit badge de tendance (flèche + %), teinté par la couleur de la métrique. */
-@Composable
-private fun TrendPill(up: Boolean, text: String, color: Color) {
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(50))
-            .background(color.copy(alpha = 0.14f))
-            .padding(horizontal = 8.dp, vertical = 3.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            if (up) Icons.Filled.ArrowDropUp else Icons.Filled.ArrowDropDown,
-            contentDescription = null,
-            tint = color,
-            modifier = Modifier.size(16.dp)
-        )
-        Text(text, style = MaterialTheme.typography.labelSmall, color = color, fontWeight = FontWeight.Bold)
-    }
-}
-
-/** Chip « net ce mois » en creux, sous le solde. */
-@Composable
-private fun NetChip(net: BigDecimal) {
-    val positive = net >= BigDecimal.ZERO
-    val c = if (positive) IncomeColor else ExpenseColor
-    Row(
-        modifier = Modifier
-            .neumorphicPressed(depth = 3.dp, borderRadius = 50.dp)
-            .padding(horizontal = 15.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            if (positive) Icons.Filled.TrendingUp else Icons.Filled.TrendingDown,
-            contentDescription = null, tint = c, modifier = Modifier.size(15.dp)
-        )
-        Spacer(Modifier.width(6.dp))
-        Text(
-            (if (positive) "+" else "") + String.format(java.util.Locale.FRANCE, "%,.0f € ce mois", net),
-            style = MaterialTheme.typography.labelMedium,
-            color = c,
-            fontWeight = FontWeight.SemiBold
-        )
     }
 }
