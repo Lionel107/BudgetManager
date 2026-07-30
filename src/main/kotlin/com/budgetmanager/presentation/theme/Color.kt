@@ -33,26 +33,28 @@ data class NeumorphicColors(
 val LightNeumorphicColors = NeumorphicColors(
     // MATIÈRE UNIQUE : fond ET éléments partagent la même teinte ; le volume vient
     // du dégradé de surface (convexe/concave) + des ombres du modificateur.
-    background = Color(0xFFE4EBF5),
-    elevated = Color(0xFFE4EBF5),          // bosses = même matière (extrudées)
-    depressed = Color(0xFFE4EBF5),         // creux = même matière (concave)
-    primary = Color(0xFF16E0E8),           // cyan néon : accent
-    primaryVariant = Color(0xFF3B82F6),
-    textPrimary = Color(0xFF22314B),
-    textSecondary = Color(0xFF64728C),
-    textTertiary = Color(0xFF98A4BC),
-    lightShadow = Color(0xFFFFFFFF),       // lumière haut-gauche
-    darkShadow = Color(0xFFBFC9DC),        // ombre bleutée douce (volume)
-    income = Color(0xFF12E0B4),            // vert néon
-    expense = Color(0xFFFF6E8A),           // rose néon
-    budgetSafe = Color(0xFF12E0B4),
+    // Charte "Émeraude Tech" (clair futuriste) : base plate, cartes blanches
+    // bordées, accent émeraude->teal. Le relief neumorphique est abandonné.
+    background = Color(0xFFF1F5F3),
+    elevated = Color(0xFFFFFFFF),          // cartes blanches
+    depressed = Color(0xFFEDF2F0),         // fonds de champ / creux légers
+    primary = Color(0xFF0FB985),           // émeraude
+    primaryVariant = Color(0xFF06D6C4),    // teal (2e arrêt du dégradé)
+    textPrimary = Color(0xFF0C1512),
+    textSecondary = Color(0xFF5B6B65),
+    textTertiary = Color(0xFF94A39C),
+    lightShadow = Color(0xFFFFFFFF),
+    darkShadow = Color(0xFFE1E7E4),        // sert de couleur de bordure fine
+    income = Color(0xFF0FB985),
+    expense = Color(0xFFF43F5E),
+    budgetSafe = Color(0xFF0FB985),
     budgetWarning = Color(0xFFF5A623),
-    budgetAlert = Color(0xFFFF6E8A),
-    transfer = Color(0xFF16E0E8),
-    cardBackground = Color(0xFFE4EBF5),
-    dialogBackground = Color(0xFFEAEFF7),
-    textFieldFocused = Color.White.copy(alpha = 0.35f),
-    textFieldUnfocused = Color(0xFFE4E9F1),
+    budgetAlert = Color(0xFFF43F5E),
+    transfer = Color(0xFF06D6C4),
+    cardBackground = Color(0xFFFFFFFF),
+    dialogBackground = Color(0xFFFFFFFF),
+    textFieldFocused = Color(0xFFFFFFFF),
+    textFieldUnfocused = Color(0xFFEDF2F0),
 )
 
 // ===== Dark Theme =====

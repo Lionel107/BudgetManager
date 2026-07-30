@@ -22,7 +22,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.border
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -91,13 +94,12 @@ fun NeumorphicCard(
     backgroundColor: Color = NeumorphicElevated,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    // Style "Émeraude Tech" : carte plate blanche, fine bordure, coins doux.
     Column(
         modifier = modifier
-            .neumorphicShadow(
-                elevation = elevation,
-                borderRadius = borderRadius,
-                backgroundColor = backgroundColor
-            )
+            .clip(RoundedCornerShape(borderRadius))
+            .background(backgroundColor)
+            .border(1.dp, NeumorphicDarkShadow, RoundedCornerShape(borderRadius))
             .padding(20.dp),
         content = content
     )
@@ -347,22 +349,27 @@ fun NeumorphicButton(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isHovered by interactionSource.collectIsHoveredAsState()
-    val isPressed by interactionSource.collectIsPressedAsState()
+    val shape = RoundedCornerShape(14.dp)
 
-    // Pas de bouton coloré : le principal est distingué par son icône cyan + texte gras.
-    val contentColor = if (!enabled) NeumorphicTextTertiary else NeumorphicTextPrimary
-    val iconTint = if (isPrimary && enabled) NeumorphicPrimary else contentColor
+    val contentColor = when {
+        !enabled -> NeumorphicTextTertiary
+        isPrimary -> Color(0xFF04140E)
+        else -> NeumorphicTextPrimary
+    }
+    val iconTint = contentColor
 
     Row(
         modifier = modifier
             .then(
                 when {
-                    !enabled -> Modifier
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(NeumorphicDepressed)
-                    isPressed -> Modifier.neumorphicPressed(depth = 5.dp, borderRadius = 14.dp)
-                    isHovered -> Modifier.neumorphicShadow(elevation = 9.dp, borderRadius = 14.dp)
-                    else -> Modifier.neumorphicShadow(elevation = 6.dp, borderRadius = 14.dp)
+                    !enabled -> Modifier.clip(shape).background(NeumorphicDepressed)
+                    isPrimary -> Modifier
+                        .shadow(if (isHovered) 16.dp else 8.dp, shape, ambientColor = NeumorphicPrimary, spotColor = NeumorphicPrimary)
+                        .clip(shape)
+                        .background(Brush.linearGradient(listOf(NeumorphicPrimary, NeumorphicPrimaryVariant)))
+                    else -> Modifier.clip(shape)
+                        .background(NeumorphicElevated)
+                        .border(1.dp, if (isHovered) NeumorphicPrimary.copy(alpha = 0.6f) else NeumorphicDarkShadow, shape)
                 }
             )
             .pointerHoverIcon(if (enabled) PointerIcon.Hand else PointerIcon.Default)
