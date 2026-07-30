@@ -9,22 +9,11 @@ import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.PaintingStyle
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import org.jetbrains.skia.FilterBlurMode
 import org.jetbrains.skia.MaskFilter
-import org.jetbrains.skia.Shader
 import androidx.compose.ui.geometry.RoundRect
-
-/**
- * Dégradé de SURFACE qui simule la courbure d'un bombé/creux dans la matière
- * (plus clair en haut-gauche, plus foncé en bas-droite). C'est ce qui donne
- * l'impression « sculpté dans le fond » plutôt que « posé au-dessus ».
- */
-private fun surfaceStops(base: Color): Pair<Color, Color> =
-    lerp(base, Color.White, 0.30f) to lerp(base, Color.Black, 0.05f)
 
 /**
  * Neumorphic raised shadow effect - element appears elevated above the surface.
@@ -64,17 +53,11 @@ fun Modifier.neumorphicShadow(
             }
         }
 
-        // Fond avec dégradé CONVEXE (clair haut-gauche -> foncé bas-droite)
-        val (convexLight, convexDark) = surfaceStops(backgroundColor)
+        // Fond PLEIN (couleur unie) — pas de dégradé gris ; le relief vient des ombres.
         val bgPaint = Paint().apply {
+            color = backgroundColor
             style = PaintingStyle.Fill
-            asFrameworkPaint().apply {
-                isAntiAlias = true
-                shader = Shader.makeLinearGradient(
-                    0f, 0f, size.width, size.height,
-                    intArrayOf(convexLight.toArgb(), convexDark.toArgb())
-                )
-            }
+            asFrameworkPaint().isAntiAlias = true
         }
 
         // Dark shadow path (offset bottom-right)
@@ -161,17 +144,11 @@ fun Modifier.neumorphicPressed(
             }
         }
 
-        // Fond avec dégradé CONCAVE (foncé haut-gauche -> clair bas-droite = creux)
-        val (concaveLight, concaveDark) = surfaceStops(backgroundColor)
+        // Fond PLEIN (couleur unie) — pas de dégradé gris ; le creux vient des ombres.
         val bgPaint = Paint().apply {
+            color = backgroundColor
             style = PaintingStyle.Fill
-            asFrameworkPaint().apply {
-                isAntiAlias = true
-                shader = Shader.makeLinearGradient(
-                    0f, 0f, size.width, size.height,
-                    intArrayOf(concaveDark.toArgb(), concaveLight.toArgb())
-                )
-            }
+            asFrameworkPaint().isAntiAlias = true
         }
 
         val bgPath = Path().apply {
