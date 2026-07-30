@@ -9,11 +9,22 @@ import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.PaintingStyle
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import org.jetbrains.skia.FilterBlurMode
 import org.jetbrains.skia.MaskFilter
+import org.jetbrains.skia.Shader
 import androidx.compose.ui.geometry.RoundRect
+
+/**
+ * Dégradé de SURFACE qui simule la courbure d'un bombé/creux dans la matière
+ * (plus clair en haut-gauche, plus foncé en bas-droite). C'est ce qui donne
+ * l'impression « sculpté dans le fond » plutôt que « posé au-dessus ».
+ */
+private fun surfaceStops(base: Color): Pair<Color, Color> =
+    lerp(base, Color.White, 0.30f) to lerp(base, Color.Black, 0.05f)
 
 /**
  * Neumorphic raised shadow effect - element appears elevated above the surface.
@@ -35,7 +46,7 @@ fun Modifier.neumorphicShadow(
 
         // Dark shadow (bottom-right) using Skia MaskFilter
         val darkPaint = Paint().apply {
-            color = darkShadowColor.copy(alpha = 0.35f)
+            color = darkShadowColor.copy(alpha = 0.55f)
             style = PaintingStyle.Fill
             asFrameworkPaint().apply {
                 isAntiAlias = true
@@ -45,7 +56,7 @@ fun Modifier.neumorphicShadow(
 
         // Light shadow (top-left) using Skia MaskFilter
         val lightPaint = Paint().apply {
-            color = lightShadowColor.copy(alpha = 0.8f)
+            color = lightShadowColor.copy(alpha = 0.9f)
             style = PaintingStyle.Fill
             asFrameworkPaint().apply {
                 isAntiAlias = true
@@ -53,11 +64,17 @@ fun Modifier.neumorphicShadow(
             }
         }
 
-        // Background fill paint
+        // Fond avec dégradé CONVEXE (clair haut-gauche -> foncé bas-droite)
+        val (convexLight, convexDark) = surfaceStops(backgroundColor)
         val bgPaint = Paint().apply {
-            color = backgroundColor
             style = PaintingStyle.Fill
-            asFrameworkPaint().isAntiAlias = true
+            asFrameworkPaint().apply {
+                isAntiAlias = true
+                shader = Shader.makeLinearGradient(
+                    0f, 0f, size.width, size.height,
+                    intArrayOf(convexLight.toArgb(), convexDark.toArgb())
+                )
+            }
         }
 
         // Dark shadow path (offset bottom-right)
@@ -144,11 +161,17 @@ fun Modifier.neumorphicPressed(
             }
         }
 
-        // Background fill
+        // Fond avec dégradé CONCAVE (foncé haut-gauche -> clair bas-droite = creux)
+        val (concaveLight, concaveDark) = surfaceStops(backgroundColor)
         val bgPaint = Paint().apply {
-            color = backgroundColor
             style = PaintingStyle.Fill
-            asFrameworkPaint().isAntiAlias = true
+            asFrameworkPaint().apply {
+                isAntiAlias = true
+                shader = Shader.makeLinearGradient(
+                    0f, 0f, size.width, size.height,
+                    intArrayOf(concaveDark.toArgb(), concaveLight.toArgb())
+                )
+            }
         }
 
         val bgPath = Path().apply {

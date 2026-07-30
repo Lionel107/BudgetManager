@@ -8,6 +8,7 @@ import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -22,8 +23,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -348,43 +347,22 @@ fun NeumorphicButton(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isHovered by interactionSource.collectIsHoveredAsState()
+    val isPressed by interactionSource.collectIsPressedAsState()
 
-    val contentColor = when {
-        !enabled -> NeumorphicTextTertiary
-        isPrimary && isHovered -> Color.White
-        isPrimary -> Color.White
-        else -> NeumorphicTextPrimary
-    }
+    // Pas de bouton coloré : le principal est distingué par son icône cyan + texte gras.
+    val contentColor = if (!enabled) NeumorphicTextTertiary else NeumorphicTextPrimary
+    val iconTint = if (isPrimary && enabled) NeumorphicPrimary else contentColor
 
     Row(
         modifier = modifier
             .then(
                 when {
                     !enabled -> Modifier
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(14.dp))
                         .background(NeumorphicDepressed)
-                    isPrimary -> Modifier
-                        // dégradé néon indigo→cyan + glow (accent unique de l'écran)
-                        .shadow(
-                            elevation = if (isHovered) 16.dp else 10.dp,
-                            shape = RoundedCornerShape(12.dp),
-                            spotColor = NeumorphicPrimary,
-                            ambientColor = NeumorphicPrimary
-                        )
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(
-                            Brush.linearGradient(listOf(NeumorphicPrimary, NeumorphicPrimaryVariant))
-                        )
-                    isHovered -> Modifier.neumorphicPressed(
-                        depth = 4.dp,
-                        borderRadius = 12.dp,
-                        backgroundColor = NeumorphicDepressed
-                    )
-                    else -> Modifier.neumorphicShadow(
-                        elevation = 6.dp,
-                        borderRadius = 12.dp,
-                        backgroundColor = NeumorphicElevated
-                    )
+                    isPressed -> Modifier.neumorphicPressed(depth = 5.dp, borderRadius = 14.dp)
+                    isHovered -> Modifier.neumorphicShadow(elevation = 9.dp, borderRadius = 14.dp)
+                    else -> Modifier.neumorphicShadow(elevation = 6.dp, borderRadius = 14.dp)
                 }
             )
             .pointerHoverIcon(if (enabled) PointerIcon.Hand else PointerIcon.Default)
@@ -403,7 +381,7 @@ fun NeumorphicButton(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = contentColor,
+                tint = iconTint,
                 modifier = Modifier.size(18.dp)
             )
             Spacer(Modifier.width(8.dp))
@@ -412,7 +390,7 @@ fun NeumorphicButton(
             text = text,
             style = MaterialTheme.typography.labelLarge,
             color = contentColor,
-            fontWeight = FontWeight.SemiBold
+            fontWeight = if (isPrimary) FontWeight.Bold else FontWeight.SemiBold
         )
     }
 }

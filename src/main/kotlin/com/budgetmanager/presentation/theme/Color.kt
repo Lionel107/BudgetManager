@@ -31,26 +31,28 @@ data class NeumorphicColors(
 // ===== Light Theme =====
 
 val LightNeumorphicColors = NeumorphicColors(
-    background = Color(0xFFF2F5F9),        // fond blanc cassé très lumineux
-    elevated = Color(0xFFFFFFFF),          // panneaux : blanc pur
-    depressed = Color(0xFFECEFF4),         // creux (cavités)
-    primary = Color(0xFF6D5EF6),           // indigo néon (1er arrêt du dégradé)
-    primaryVariant = Color(0xFF22D3EE),    // cyan néon (2e arrêt du dégradé)
-    textPrimary = Color(0xFF182130),
-    textSecondary = Color(0xFF576071),
-    textTertiary = Color(0xFF96A0B1),
-    lightShadow = Color(0xFFFFFFFF),
-    darkShadow = Color(0xFFBFC6D3),        // ombre neutre (sans bleu)
-    income = Color(0xFF0FC9A6),            // menthe
+    // MATIÈRE UNIQUE : fond ET éléments partagent la même teinte ; le volume vient
+    // du dégradé de surface (convexe/concave) + des ombres du modificateur.
+    background = Color(0xFFE4E9F1),
+    elevated = Color(0xFFE4E9F1),          // bosses = même matière (extrudées)
+    depressed = Color(0xFFE4E9F1),         // creux = même matière (concave)
+    primary = Color(0xFF10C6D6),           // cyan : accent rare et précis
+    primaryVariant = Color(0xFF0BB4C3),
+    textPrimary = Color(0xFF2A3446),
+    textSecondary = Color(0xFF6B7688),
+    textTertiary = Color(0xFFA3ACBC),
+    lightShadow = Color(0xFFFFFFFF),       // lumière haut-gauche
+    darkShadow = Color(0xFFAAB4C8),        // ombre neutre bas-droite (volume)
+    income = Color(0xFF14C79A),            // menthe
     expense = Color(0xFFFF6B81),           // corail-rose
-    budgetSafe = Color(0xFF0FC9A6),
+    budgetSafe = Color(0xFF14C79A),
     budgetWarning = Color(0xFFF5A623),
     budgetAlert = Color(0xFFFF5C6A),
-    transfer = Color(0xFF38BDF8),
-    cardBackground = Color(0xFFFFFFFF),
-    dialogBackground = Color(0xFFFFFFFF),
-    textFieldFocused = Color.White.copy(alpha = 0.9f),
-    textFieldUnfocused = Color(0xFFECEFF4).copy(alpha = 0.9f),
+    transfer = Color(0xFF10C6D6),
+    cardBackground = Color(0xFFE4E9F1),
+    dialogBackground = Color(0xFFE9ECF3),
+    textFieldFocused = Color.White.copy(alpha = 0.35f),
+    textFieldUnfocused = Color(0xFFE4E9F1),
 )
 
 // ===== Dark Theme =====
