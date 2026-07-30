@@ -10,65 +10,71 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="Budget" />
   <style>
+    /* Charte "Émeraude Tech" (clair, plat, bordures fines, accent émeraude) */
     :root {
-      --bg: #e0e5ec; --elevated: #e8edf4; --depressed: #d1d9e6;
-      --primary: #6c63ff; --text: #2d3436; --text2: #636e72; --text3: #b2bec3;
-      --income: #00b894; --expense: #e17055; --alert: #d63031;
-      --light: #ffffff; --dark: #a3b1c6;
+      --bg: #f1f5f3; --card: #ffffff; --border: #e1e7e4; --field: #edf2f0;
+      --accent: #0fb985; --accent2: #06d6c4;
+      --text: #0c1512; --text2: #5b6b65; --text3: #94a39c;
+      --income: #0fb985; --expense: #f43f5e; --alert: #f43f5e;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: var(--bg); color: var(--text);
-      min-height: 100vh; padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+      color: var(--text); min-height: 100vh; letter-spacing: -.01em;
+      background:
+        radial-gradient(520px circle at 90% -6%, rgba(18,230,160,.13), transparent 60%),
+        radial-gradient(460px circle at -8% 108%, rgba(6,214,196,.12), transparent 60%),
+        var(--bg);
+      background-attachment: fixed;
+      padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
     }
-    .wrap { max-width: 480px; margin: 0 auto; padding: 16px; }
-    h1 { font-size: 1.4rem; color: var(--primary); }
+    .wrap { max-width: 480px; margin: 0 auto; padding: 18px; }
+    h1 { font-size: 1.4rem; font-weight: 750; color: var(--text); letter-spacing: -.02em; }
     .muted { color: var(--text2); font-size: .9rem; }
     .card {
-      background: var(--elevated); border-radius: 16px; padding: 18px; margin: 14px 0;
-      box-shadow: 6px 6px 12px var(--dark), -6px -6px 12px var(--light);
+      background: var(--card); border: 1px solid var(--border); border-radius: 18px; padding: 18px; margin: 14px 0;
+      box-shadow: 0 6px 22px rgba(12,21,18,.05);
     }
-    label { display: block; font-size: .8rem; color: var(--text2); margin: 12px 0 6px; }
+    label { display: block; font-size: .78rem; color: var(--text2); margin: 14px 0 6px; font-weight: 500; }
     input, select {
-      width: 100%; font-size: 1rem; color: var(--text); border: none; outline: none;
-      background: var(--depressed); border-radius: 12px; padding: 14px;
-      box-shadow: inset 3px 3px 6px var(--dark), inset -3px -3px 6px var(--light);
+      width: 100%; font-size: 1rem; color: var(--text); outline: none;
+      background: var(--field); border: 1px solid var(--border); border-radius: 12px; padding: 13px 14px;
+      transition: border-color .15s, box-shadow .15s;
     }
-    /* Menus déroulants : on retire la flèche native et on met un chevron neumorphique discret */
+    input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(15,185,133,.12); }
     select {
       appearance: none !important; -webkit-appearance: none !important; -moz-appearance: none !important;
       padding-right: 44px; cursor: pointer;
-      background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="%23636e72" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>');
+      background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="%235b6b65" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>');
       background-repeat: no-repeat; background-position: right 16px center;
     }
-    select::-ms-expand { display: none; } /* anciens Edge/IE */
-    /* iOS : le fond des options suit le thème */
-    select option { background: var(--elevated); color: var(--text); }
+    select::-ms-expand { display: none; }
+    select option { background: var(--card); color: var(--text); }
     button {
-      width: 100%; font-size: 1rem; font-weight: 600; color: #fff; cursor: pointer;
-      background: var(--primary); border: none; border-radius: 12px; padding: 15px; margin-top: 18px;
-      box-shadow: 4px 4px 8px var(--dark), -4px -4px 8px var(--light);
+      width: 100%; font-size: 1rem; font-weight: 650; color: #04140e; cursor: pointer;
+      background: linear-gradient(120deg, var(--accent), var(--accent2)); border: none; border-radius: 12px;
+      padding: 15px; margin-top: 18px; box-shadow: 0 6px 18px rgba(15,185,133,.28);
     }
     button:active { transform: translateY(1px); }
-    button.secondary { background: var(--depressed); color: var(--text); }
+    button.secondary { background: var(--card); color: var(--text); border: 1px solid var(--border); box-shadow: none; }
     button:disabled { opacity: .6; }
     .seg { display: flex; gap: 8px; }
-    .seg button { margin-top: 0; background: var(--depressed); color: var(--text2); font-weight: 500; }
-    .seg button.on-expense { background: var(--expense); color: #fff; }
-    .seg button.on-income { background: var(--income); color: #fff; }
+    .seg button { margin-top: 0; background: var(--card); border: 1px solid var(--border); color: var(--text2); font-weight: 550; box-shadow: none; }
+    .seg button.on-expense { background: var(--expense); color: #fff; border-color: transparent; }
+    .seg button.on-income { background: var(--income); color: #fff; border-color: transparent; }
+    .seg button.on-mode { background: linear-gradient(120deg, var(--accent), var(--accent2)); color: #04140e; border-color: transparent; }
     .row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
     .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
-    .link { color: var(--primary); text-align: center; margin-top: 16px; font-size: .9rem; cursor: pointer; }
+    .link { color: var(--accent); text-align: center; margin-top: 16px; font-size: .9rem; cursor: pointer; }
     .msg { text-align: center; font-size: .85rem; margin-top: 12px; }
     .msg.err { color: var(--alert); }
     .msg.ok { color: var(--income); }
-    .txn { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--depressed); }
+    .txn { display: flex; justify-content: space-between; padding: 11px 0; border-bottom: 1px solid var(--border); }
     .txn:last-child { border-bottom: none; }
-    .amt.exp { color: var(--expense); font-weight: 600; }
-    .amt.inc { color: var(--income); font-weight: 600; }
+    .amt.exp { color: var(--expense); font-weight: 650; }
+    .amt.inc { color: var(--income); font-weight: 650; }
     .hidden { display: none !important; }
-    .logout { width: auto; margin: 0; padding: 8px 14px; font-size: .8rem; background: var(--depressed); color: var(--text2); box-shadow: none; }
+    .logout { width: auto; margin: 0; padding: 8px 14px; font-size: .8rem; background: var(--card); color: var(--text2); border: 1px solid var(--border); box-shadow: none; }
     .spin { text-align: center; padding: 40px; color: var(--text2); }
   </style>
 </head>
@@ -106,11 +112,16 @@
           <button type="button" id="type-income">Revenu</button>
         </div>
 
+        <div class="seg" style="margin-top:10px">
+          <button type="button" id="mode-once" class="on-mode">Ponctuelle</button>
+          <button type="button" id="mode-recur">Récurrente</button>
+        </div>
+
         <label for="amount">Montant (€)</label>
         <input id="amount" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0,00" />
 
         <label for="title">Libellé</label>
-        <input id="title" type="text" placeholder="Ex. Courses" />
+        <input id="title" type="text" placeholder="Ex. Loyer" />
 
         <label for="account">Compte</label>
         <select id="account"></select>
@@ -118,7 +129,18 @@
         <label for="category">Catégorie</label>
         <select id="category"></select>
 
-        <label for="date">Date</label>
+        <div id="freq-wrap" class="hidden">
+          <label for="frequency">Fréquence</label>
+          <select id="frequency">
+            <option value="MONTHLY">Mensuelle</option>
+            <option value="WEEKLY">Hebdomadaire</option>
+            <option value="DAILY">Quotidienne</option>
+            <option value="QUARTERLY">Trimestrielle</option>
+            <option value="YEARLY">Annuelle</option>
+          </select>
+        </div>
+
+        <label for="date" id="date-label">Date</label>
         <input id="date" type="date" />
 
         <button id="save">Enregistrer</button>

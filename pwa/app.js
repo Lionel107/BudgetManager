@@ -12,6 +12,7 @@ const hide = (el) => el.classList.add("hidden");
 let isSignUp = false;
 let currentType = "EXPENSE";
 let categories = [];
+let mode = "ONCE"; // ONCE = transaction ponctuelle · RECUR = récurrente
 
 // ===================== AUTHENTIFICATION =====================
 
@@ -75,6 +76,19 @@ function setType(type) {
 }
 $("type-expense").addEventListener("click", () => setType("EXPENSE"));
 $("type-income").addEventListener("click", () => setType("INCOME"));
+
+// ===================== MODE ponctuelle / récurrente =====================
+
+function setMode(m) {
+  mode = m;
+  $("mode-once").className = m === "ONCE" ? "on-mode" : "";
+  $("mode-recur").className = m === "RECUR" ? "on-mode" : "";
+  $("freq-wrap").classList.toggle("hidden", m !== "RECUR");
+  $("date-label").textContent = m === "RECUR" ? "Première échéance" : "Date";
+  $("save").textContent = m === "RECUR" ? "Créer la récurrence" : "Enregistrer";
+}
+$("mode-once").addEventListener("click", () => setMode("ONCE"));
+$("mode-recur").addEventListener("click", () => setMode("RECUR"));
 
 function renderCategories() {
   const sel = $("category");
@@ -147,6 +161,29 @@ $("save").addEventListener("click", async () => {
 
   $("save").disabled = true;
   try {
+    // --- Récurrente : insertion dans recurring_transactions ---
+    if (mode === "RECUR") {
+      const { error } = await supabase.from("recurring_transactions").insert({
+        title,
+        amount,
+        account_id: Number(accountId),
+        category_id: categoryId ? Number(categoryId) : null,
+        frequency_type: $("frequency").value,
+        repeat_interval: 1,
+        start_date: dateStr,
+        next_due_date: dateStr,
+        transaction_type: currentType,
+        is_active: true,
+      });
+      if (error) throw error;
+      msg.textContent = "Récurrence créée ✓ (elle se générera automatiquement)";
+      msg.classList.add("ok");
+      $("amount").value = "";
+      $("title").value = "";
+      $("save").disabled = false;
+      return;
+    }
+
     const isoDate = new Date(dateStr + "T00:00:00Z").toISOString();
     const { error } = await supabase.rpc("create_transaction", {
       p_account_id: Number(accountId),
