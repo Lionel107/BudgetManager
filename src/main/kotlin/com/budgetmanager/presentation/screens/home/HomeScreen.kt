@@ -60,7 +60,7 @@ import java.time.format.DateTimeFormatter
 // ============================================================================
 // Charte "Émeraude Tech" (thème clair, futuriste). Local à l'Accueil pour l'instant.
 // ============================================================================
-private val EmBg = Color(0xFFF1F5F3)
+private val EmBg = Color(0xFFFFFFFF)
 private val EmPanel = Color(0xFFFFFFFF)
 private val EmBorder = Color(0xFFE1E7E4)
 private val EmFg = Color(0xFF0C1512)
@@ -235,8 +235,6 @@ fun HomeScreen(navigationState: NavigationState) {
     val dateFormatter = remember { DateTimeFormatter.ofPattern("dd/MM/yyyy") }
 
     Box(Modifier.fillMaxSize().background(EmBg)) {
-        AuroraBackground(Modifier.matchParentSize())
-
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -324,32 +322,6 @@ fun HomeScreen(navigationState: NavigationState) {
                 }
             }
             Spacer(Modifier.height(30.dp))
-        }
-    }
-}
-
-// ===================== Fond aurora =====================
-
-@Composable
-private fun AuroraBackground(modifier: Modifier) {
-    Canvas(modifier) {
-        // halos aurora
-        drawRect(Brush.radialGradient(
-            listOf(EmAccent.copy(alpha = 0.13f), Color.Transparent),
-            center = Offset(size.width * 0.9f, 0f), radius = size.minDimension * 0.7f
-        ))
-        drawRect(Brush.radialGradient(
-            listOf(EmAccent2.copy(alpha = 0.12f), Color.Transparent),
-            center = Offset(0f, size.height), radius = size.minDimension * 0.7f
-        ))
-        // grille de points discrète
-        val step = 30.dp.toPx()
-        val dot = EmFg.copy(alpha = 0.04f)
-        var y = 0f
-        while (y < size.height) {
-            var x = 0f
-            while (x < size.width) { drawCircle(dot, radius = 1f, center = Offset(x, y)); x += step }
-            y += step
         }
     }
 }

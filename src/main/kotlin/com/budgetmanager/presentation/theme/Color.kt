@@ -35,7 +35,7 @@ val LightNeumorphicColors = NeumorphicColors(
     // du dégradé de surface (convexe/concave) + des ombres du modificateur.
     // Charte "Émeraude Tech" (clair futuriste) : base plate, cartes blanches
     // bordées, accent émeraude->teal. Le relief neumorphique est abandonné.
-    background = Color(0xFFF1F5F3),
+    background = Color(0xFFFFFFFF),        // fond blanc pur
     elevated = Color(0xFFFFFFFF),          // cartes blanches
     depressed = Color(0xFFEDF2F0),         // fonds de champ / creux légers
     primary = Color(0xFF0FB985),           // émeraude
