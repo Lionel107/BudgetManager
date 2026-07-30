@@ -33,24 +33,24 @@ data class NeumorphicColors(
 val LightNeumorphicColors = NeumorphicColors(
     // MATIÈRE UNIQUE : fond ET éléments partagent la même teinte ; le volume vient
     // du dégradé de surface (convexe/concave) + des ombres du modificateur.
-    background = Color(0xFFE4E9F1),
-    elevated = Color(0xFFE4E9F1),          // bosses = même matière (extrudées)
-    depressed = Color(0xFFE4E9F1),         // creux = même matière (concave)
-    primary = Color(0xFF10C6D6),           // cyan : accent rare et précis
-    primaryVariant = Color(0xFF0BB4C3),
-    textPrimary = Color(0xFF2A3446),
-    textSecondary = Color(0xFF6B7688),
-    textTertiary = Color(0xFFA3ACBC),
+    background = Color(0xFFE4EBF5),
+    elevated = Color(0xFFE4EBF5),          // bosses = même matière (extrudées)
+    depressed = Color(0xFFE4EBF5),         // creux = même matière (concave)
+    primary = Color(0xFF16E0E8),           // cyan néon : accent
+    primaryVariant = Color(0xFF3B82F6),
+    textPrimary = Color(0xFF22314B),
+    textSecondary = Color(0xFF64728C),
+    textTertiary = Color(0xFF98A4BC),
     lightShadow = Color(0xFFFFFFFF),       // lumière haut-gauche
-    darkShadow = Color(0xFFAAB4C8),        // ombre neutre bas-droite (volume)
-    income = Color(0xFF14C79A),            // menthe
-    expense = Color(0xFFFF6B81),           // corail-rose
-    budgetSafe = Color(0xFF14C79A),
+    darkShadow = Color(0xFFBFC9DC),        // ombre bleutée douce (volume)
+    income = Color(0xFF12E0B4),            // vert néon
+    expense = Color(0xFFFF6E8A),           // rose néon
+    budgetSafe = Color(0xFF12E0B4),
     budgetWarning = Color(0xFFF5A623),
-    budgetAlert = Color(0xFFFF5C6A),
-    transfer = Color(0xFF10C6D6),
-    cardBackground = Color(0xFFE4E9F1),
-    dialogBackground = Color(0xFFE9ECF3),
+    budgetAlert = Color(0xFFFF6E8A),
+    transfer = Color(0xFF16E0E8),
+    cardBackground = Color(0xFFE4EBF5),
+    dialogBackground = Color(0xFFEAEFF7),
     textFieldFocused = Color.White.copy(alpha = 0.35f),
     textFieldUnfocused = Color(0xFFE4E9F1),
 )

@@ -16,6 +16,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
@@ -317,7 +320,7 @@ fun HomeScreen(navigationState: NavigationState) {
                 }
             }
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(32.dp))
 
             // Income / Expenses / Net — cartes neumorphiques avec mini-courbe + badge de tendance
             Row(
@@ -329,7 +332,7 @@ fun HomeScreen(navigationState: NavigationState) {
                 StatCard("Net du mois", ui.monthlyIncome.subtract(ui.monthlyExpenses), null, ui.netSeries, NeumorphicPrimary, Modifier.weight(1f))
             }
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(32.dp))
 
             // Quick actions
             SectionHeader(title = "Actions rapides")
@@ -367,14 +370,14 @@ fun HomeScreen(navigationState: NavigationState) {
                 )
             }
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(32.dp))
 
             // Net worth evolution + projections
             if (ui.netWorthHistory.isNotEmpty()) {
                 SectionHeader(title = "Patrimoine - 12 mois")
                 Spacer(Modifier.height(8.dp))
                 NetWorthChart(ui.netWorthHistory)
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(28.dp))
             }
 
             // Projections
@@ -388,7 +391,7 @@ fun HomeScreen(navigationState: NavigationState) {
                     StatDivider()
                     ProjectionCard("Dans 6 mois", ui.projection6Months, modifier = Modifier.weight(1f))
                 }
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(28.dp))
             }
 
             // Recent transactions
@@ -463,30 +466,36 @@ private fun NetWorthChart(history: List<Pair<String, BigDecimal>>) {
                 )
             }
         }
-        Spacer(Modifier.height(12.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth().height(120.dp),
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
-            verticalAlignment = Alignment.Bottom
-        ) {
-            history.forEach { (label, value) ->
-                Column(
-                    modifier = Modifier.weight(1f),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Bottom
-                ) {
-                    val height = ((value.toFloat() - minValue) / range).coerceIn(0.05f, 1f)
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(0.8f)
-                            .fillMaxHeight(height)
-                            .clip(androidx.compose.foundation.shape.RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
-                            .background(NeumorphicPrimary)
-                    )
-                }
+        Spacer(Modifier.height(16.dp))
+        val primaryColor = NeumorphicPrimary
+        val gridColor = NeumorphicTextTertiary.copy(alpha = 0.20f)
+        val chartValues = history.map { it.second.toFloat() }
+        Canvas(modifier = Modifier.fillMaxWidth().height(130.dp)) {
+            if (chartValues.size < 2) return@Canvas
+            val minV = chartValues.minOrNull() ?: 0f
+            val maxV = chartValues.maxOrNull() ?: 0f
+            val rng = (maxV - minV).coerceAtLeast(0.01f)
+            val padY = size.height * 0.16f
+            val padX = 6.dp.toPx()
+            val stepX = (size.width - padX * 2) / (chartValues.size - 1)
+            val pts = chartValues.mapIndexed { i, v ->
+                Offset(padX + i * stepX, size.height - padY - ((v - minV) / rng) * (size.height - padY * 2))
             }
+            val dash = PathEffect.dashPathEffect(floatArrayOf(2f, 8f), 0f)
+            for (g in 1..3) {
+                val y = size.height / 4f * g
+                drawLine(gridColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f, pathEffect = dash)
+            }
+            drawPath(
+                buildSmooth(pts, true, size.height),
+                Brush.verticalGradient(listOf(primaryColor.copy(alpha = 0.30f), primaryColor.copy(alpha = 0f)))
+            )
+            val line = buildSmooth(pts, false, 0f)
+            drawPath(line, primaryColor.copy(alpha = 0.18f), style = Stroke(7.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+            drawPath(line, primaryColor, style = Stroke(3.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+            drawCircle(primaryColor, radius = 4.5.dp.toPx(), center = pts.last())
         }
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(8.dp))
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
             history.forEach { (label, _) ->
                 Text(
@@ -583,7 +592,27 @@ private fun StatDivider() {
     )
 }
 
-/** Mini-courbe lumineuse (ligne + aire dégradée + point final) sur une petite série. */
+/**
+ * Construit une courbe LISSE (Catmull-Rom → Bézier cubique) passant par [points].
+ * [close] = true ferme l'aire jusqu'à [bottom] pour un remplissage dégradé.
+ */
+private fun buildSmooth(points: List<Offset>, close: Boolean, bottom: Float): Path {
+    val p = Path()
+    if (points.isEmpty()) return p
+    if (close) { p.moveTo(points[0].x, bottom); p.lineTo(points[0].x, points[0].y) }
+    else p.moveTo(points[0].x, points[0].y)
+    for (i in 0 until points.size - 1) {
+        val p0 = points.getOrElse(i - 1) { points[i] }
+        val p1 = points[i]; val p2 = points[i + 1]; val p3 = points.getOrElse(i + 2) { p2 }
+        val c1x = p1.x + (p2.x - p0.x) / 6f; val c1y = p1.y + (p2.y - p0.y) / 6f
+        val c2x = p2.x - (p3.x - p1.x) / 6f; val c2y = p2.y - (p3.y - p1.y) / 6f
+        p.cubicTo(c1x, c1y, c2x, c2y, p2.x, p2.y)
+    }
+    if (close) { p.lineTo(points.last().x, bottom); p.close() }
+    return p
+}
+
+/** Mini-courbe LISSE lumineuse (aire dégradée + ligne + halo néon + point final). */
 @Composable
 private fun Sparkline(values: List<Float>, color: Color, modifier: Modifier = Modifier) {
     Canvas(modifier) {
@@ -591,31 +620,17 @@ private fun Sparkline(values: List<Float>, color: Color, modifier: Modifier = Mo
         val minV = values.minOrNull() ?: 0f
         val maxV = values.maxOrNull() ?: 0f
         val range = (maxV - minV).coerceAtLeast(0.01f)
+        val padY = size.height * 0.14f
         val stepX = size.width / (values.size - 1)
-        fun pt(i: Int) = Offset(
-            x = i * stepX,
-            y = size.height - ((values[i] - minV) / range) * (size.height * 0.85f) - size.height * 0.08f
-        )
-        val line = Path().apply {
-            moveTo(pt(0).x, pt(0).y)
-            for (i in 1 until values.size) lineTo(pt(i).x, pt(i).y)
+        val points = values.mapIndexed { i, v ->
+            Offset(i * stepX, size.height - padY - ((v - minV) / range) * (size.height - padY * 2))
         }
-        val area = Path().apply {
-            moveTo(pt(0).x, size.height)
-            for (i in values.indices) lineTo(pt(i).x, pt(i).y)
-            lineTo(pt(values.lastIndex).x, size.height)
-            close()
-        }
-        drawPath(area, Brush.verticalGradient(listOf(color.copy(alpha = 0.22f), color.copy(alpha = 0f))))
-        drawPath(
-            line, color,
-            style = Stroke(
-                width = 2.dp.toPx(),
-                cap = androidx.compose.ui.graphics.StrokeCap.Round,
-                join = androidx.compose.ui.graphics.StrokeJoin.Round
-            )
-        )
-        drawCircle(color, radius = 2.6.dp.toPx(), center = pt(values.lastIndex))
+        drawPath(buildSmooth(points, true, size.height),
+            Brush.verticalGradient(listOf(color.copy(alpha = 0.22f), color.copy(alpha = 0f))))
+        val line = buildSmooth(points, false, 0f)
+        drawPath(line, color.copy(alpha = 0.18f), style = Stroke(6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawPath(line, color, style = Stroke(2.2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawCircle(color, radius = 2.8.dp.toPx(), center = points.last())
     }
 }
 
