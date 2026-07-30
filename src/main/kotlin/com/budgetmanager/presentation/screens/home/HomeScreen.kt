@@ -9,8 +9,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
 import androidx.compose.ui.draw.clip
@@ -45,6 +51,10 @@ data class HomeUiState(
     val isLoading: Boolean = true,
     /** Net worth history: list of (yearMonth label, total balance) for last 12 months. */
     val netWorthHistory: List<Pair<String, BigDecimal>> = emptyList(),
+    /** Séries mensuelles (7 derniers mois, ancien→récent) pour les mini-courbes du trio. */
+    val incomeSeries: List<Float> = emptyList(),
+    val expenseSeries: List<Float> = emptyList(),
+    val netSeries: List<Float> = emptyList(),
     /** Projected balance in 1, 3, 6 months at current spend rate. */
     val projection1Month: BigDecimal = BigDecimal.ZERO,
     val projection3Months: BigDecimal = BigDecimal.ZERO,
@@ -195,7 +205,22 @@ class HomeScreenState {
                                 .replaceFirstChar { it.uppercaseChar() }
                             label to nw
                         }
-                        uiState = uiState.copy(netWorthHistory = history)
+
+                        // Séries mensuelles (7 derniers mois) pour les mini-courbes
+                        val monthsList = (6 downTo 0).map { now.minusMonths(it.toLong()) }
+                        fun monthlySum(ym: java.time.YearMonth, type: TransactionType): Float =
+                            allTxs.filter { it.transactionType == type && java.time.YearMonth.from(it.date) == ym }
+                                .fold(BigDecimal.ZERO) { acc, t -> acc.add(t.amount) }.toFloat()
+                        val incSeries = monthsList.map { monthlySum(it, TransactionType.INCOME) }
+                        val expSeries = monthsList.map { monthlySum(it, TransactionType.EXPENSE) }
+                        val netSer = incSeries.zip(expSeries) { i, e -> i - e }
+
+                        uiState = uiState.copy(
+                            netWorthHistory = history,
+                            incomeSeries = incSeries,
+                            expenseSeries = expSeries,
+                            netSeries = netSer
+                        )
                     }
                 }
             } catch (e: Exception) {
@@ -268,7 +293,9 @@ fun HomeScreen(navigationState: NavigationState) {
                         style = MaterialTheme.typography.bodySmall,
                         color = NeumorphicTextTertiary
                     )
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(12.dp))
+                    NetChip(ui.monthlyIncome.subtract(ui.monthlyExpenses))
+                    Spacer(Modifier.height(12.dp))
                     // Hint visuel
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -292,16 +319,14 @@ fun HomeScreen(navigationState: NavigationState) {
 
             Spacer(Modifier.height(24.dp))
 
-            // Income / Expenses / Net — À PLAT (posé sur le fond, filets fins)
+            // Income / Expenses / Net — cartes neumorphiques avec mini-courbe + badge de tendance
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                FlatStat("Revenus du mois", ui.monthlyIncome, IncomeColor, Modifier.weight(1f))
-                StatDivider()
-                FlatStat("Dépenses du mois", ui.monthlyExpenses, ExpenseColor, Modifier.weight(1f))
-                StatDivider()
-                FlatStat("Net du mois", ui.monthlyIncome.subtract(ui.monthlyExpenses), null, Modifier.weight(1f))
+                StatCard("Revenus du mois", ui.monthlyIncome, IncomeColor, ui.incomeSeries, IncomeColor, Modifier.weight(1f))
+                StatCard("Dépenses du mois", ui.monthlyExpenses, ExpenseColor, ui.expenseSeries, ExpenseColor, Modifier.weight(1f))
+                StatCard("Net du mois", ui.monthlyIncome.subtract(ui.monthlyExpenses), null, ui.netSeries, NeumorphicPrimary, Modifier.weight(1f))
             }
 
             Spacer(Modifier.height(24.dp))
@@ -556,4 +581,126 @@ private fun StatDivider() {
             .height(38.dp)
             .background(NeumorphicTextTertiary.copy(alpha = 0.28f))
     )
+}
+
+/** Mini-courbe lumineuse (ligne + aire dégradée + point final) sur une petite série. */
+@Composable
+private fun Sparkline(values: List<Float>, color: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        if (values.size < 2) return@Canvas
+        val minV = values.minOrNull() ?: 0f
+        val maxV = values.maxOrNull() ?: 0f
+        val range = (maxV - minV).coerceAtLeast(0.01f)
+        val stepX = size.width / (values.size - 1)
+        fun pt(i: Int) = Offset(
+            x = i * stepX,
+            y = size.height - ((values[i] - minV) / range) * (size.height * 0.85f) - size.height * 0.08f
+        )
+        val line = Path().apply {
+            moveTo(pt(0).x, pt(0).y)
+            for (i in 1 until values.size) lineTo(pt(i).x, pt(i).y)
+        }
+        val area = Path().apply {
+            moveTo(pt(0).x, size.height)
+            for (i in values.indices) lineTo(pt(i).x, pt(i).y)
+            lineTo(pt(values.lastIndex).x, size.height)
+            close()
+        }
+        drawPath(area, Brush.verticalGradient(listOf(color.copy(alpha = 0.22f), color.copy(alpha = 0f))))
+        drawPath(
+            line, color,
+            style = Stroke(
+                width = 2.dp.toPx(),
+                cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                join = androidx.compose.ui.graphics.StrokeJoin.Round
+            )
+        )
+        drawCircle(color, radius = 2.6.dp.toPx(), center = pt(values.lastIndex))
+    }
+}
+
+/** Carte de statistique : label + mini-courbe, montant, badge de tendance. */
+@Composable
+private fun StatCard(
+    label: String,
+    amount: BigDecimal,
+    amountColor: Color?,
+    series: List<Float>,
+    sparkColor: Color,
+    modifier: Modifier = Modifier
+) {
+    NeumorphicCard(modifier = modifier, elevation = 6.dp, borderRadius = 18.dp) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                label.uppercase(),
+                style = MaterialTheme.typography.labelSmall,
+                color = NeumorphicTextTertiary,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1
+            )
+            if (series.size >= 2) {
+                Sparkline(series, sparkColor, Modifier.width(56.dp).height(24.dp))
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        CurrencyAmount(amount = amount, style = MaterialTheme.typography.titleLarge, color = amountColor)
+        if (series.size >= 2) {
+            val prev = series[series.size - 2]
+            val last = series.last()
+            val delta = last - prev
+            val pctTxt = if (kotlin.math.abs(prev) > 0.01f)
+                "${(kotlin.math.abs(delta / prev) * 100).toInt()} %" else "—"
+            Spacer(Modifier.height(8.dp))
+            TrendPill(up = delta >= 0f, text = pctTxt, color = sparkColor)
+        }
+    }
+}
+
+/** Petit badge de tendance (flèche + %), teinté par la couleur de la métrique. */
+@Composable
+private fun TrendPill(up: Boolean, text: String, color: Color) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(color.copy(alpha = 0.14f))
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            if (up) Icons.Filled.ArrowDropUp else Icons.Filled.ArrowDropDown,
+            contentDescription = null,
+            tint = color,
+            modifier = Modifier.size(16.dp)
+        )
+        Text(text, style = MaterialTheme.typography.labelSmall, color = color, fontWeight = FontWeight.Bold)
+    }
+}
+
+/** Chip « net ce mois » en creux, sous le solde. */
+@Composable
+private fun NetChip(net: BigDecimal) {
+    val positive = net >= BigDecimal.ZERO
+    val c = if (positive) IncomeColor else ExpenseColor
+    Row(
+        modifier = Modifier
+            .neumorphicPressed(depth = 3.dp, borderRadius = 50.dp)
+            .padding(horizontal = 15.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            if (positive) Icons.Filled.TrendingUp else Icons.Filled.TrendingDown,
+            contentDescription = null, tint = c, modifier = Modifier.size(15.dp)
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            (if (positive) "+" else "") + String.format(java.util.Locale.FRANCE, "%,.0f € ce mois", net),
+            style = MaterialTheme.typography.labelMedium,
+            color = c,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
 }
