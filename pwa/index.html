@@ -69,6 +69,15 @@
     .txn:last-child { border-bottom: none; }
     .amt.exp { color: var(--expense); font-weight: 650; }
     .amt.inc { color: var(--income); font-weight: 650; }
+    .eye { width: auto; margin: 0; padding: 8px 12px; background: var(--card); color: var(--text2);
+      border: 1px solid var(--border); box-shadow: none; border-radius: 10px; display: inline-flex; align-items: center; gap: 6px; font-size: .82rem; font-weight: 550; }
+    .eye svg { width: 17px; height: 17px; }
+    .acct { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); }
+    .acct:last-child { border-bottom: none; }
+    .acct .an { font-weight: 550; }
+    .acct .at { font-size: .76rem; color: var(--text3); }
+    .acct .bal { font-weight: 650; font-variant-numeric: tabular-nums; }
+    .acct .bal.hidden-val { letter-spacing: 2px; color: var(--text3); }
     .hidden { display: none !important; }
     .logout { width: auto; margin: 0; padding: 8px 14px; font-size: .8rem; background: var(--card); color: var(--text2); border: 1px solid var(--border); box-shadow: none; }
     .spin { text-align: center; padding: 40px; color: var(--text2); }
@@ -141,6 +150,16 @@
 
         <button id="save">Enregistrer</button>
         <div id="save-msg" class="msg"></div>
+      </div>
+
+      <div class="card">
+        <div class="row">
+          <strong>Mes comptes</strong>
+          <button id="toggle-balances" class="eye" type="button" aria-label="Afficher ou masquer les soldes">
+            <span id="eye-ic"></span><span id="eye-tx">Afficher</span>
+          </button>
+        </div>
+        <div id="accounts-list"></div>
       </div>
 
       <div class="card">

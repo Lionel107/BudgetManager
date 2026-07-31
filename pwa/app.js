@@ -13,6 +13,8 @@ let isSignUp = false;
 let currentType = "EXPENSE";
 let categories = [];
 let mode = "ONCE"; // ONCE = transaction ponctuelle · RECUR = récurrente
+let accountsData = [];        // comptes (avec solde) pour la section « Mes comptes »
+let balancesRevealed = false; // soldes masqués par défaut
 
 // ===================== AUTHENTIFICATION =====================
 
@@ -90,6 +92,35 @@ function setMode(m) {
 $("mode-once").addEventListener("click", () => setMode("ONCE"));
 $("mode-recur").addEventListener("click", () => setMode("RECUR"));
 
+// ===================== MES COMPTES (soldes masqués + bouton œil) =====================
+
+function renderAccounts() {
+  const el = $("accounts-list");
+  if (!accountsData.length) {
+    el.innerHTML = `<p class="muted">Aucun compte. Crée-en un sur le PC.</p>`;
+    return;
+  }
+  el.innerHTML = accountsData.map((a) => {
+    const cur = a.currency_code || "EUR";
+    const bal = balancesRevealed
+      ? `<span class="bal">${fmt(a.balance)} ${escapeHtml(cur)}</span>`
+      : `<span class="bal hidden-val">••••••</span>`;
+    return `<div class="acct"><span class="an">${escapeHtml(a.name)}</span>${bal}</div>`;
+  }).join("");
+}
+
+const EYE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>';
+const EYE_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20C5 20 1 12 1 12a18.5 18.5 0 0 1 5.06-5.94M9.9 4.24A9 9 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19M1 1l22 22"/></svg>';
+function updateEye() {
+  $("eye-ic").innerHTML = balancesRevealed ? EYE_OFF : EYE;
+  $("eye-tx").textContent = balancesRevealed ? "Masquer" : "Afficher";
+}
+$("toggle-balances").addEventListener("click", () => {
+  balancesRevealed = !balancesRevealed;
+  renderAccounts();
+  updateEye();
+});
+
 function renderCategories() {
   const sel = $("category");
   const list = categories.filter((c) => c.category_type === currentType);
@@ -105,7 +136,7 @@ async function loadAppData() {
   $("user-email").textContent = user?.email || "";
 
   const [acc, cat] = await Promise.all([
-    supabase.from("accounts").select("id,name").eq("is_active", true).order("display_order"),
+    supabase.from("accounts").select("id,name,balance,currency_code").eq("is_active", true).order("display_order"),
     supabase.from("categories").select("id,name,category_type").eq("is_active", true).order("display_order"),
   ]);
 
@@ -118,6 +149,10 @@ async function loadAppData() {
   accSel.innerHTML = (acc.data || [])
     .map((a) => `<option value="${a.id}">${escapeHtml(a.name)}</option>`)
     .join("") || `<option value="">(aucun compte — crée-en un sur le PC)</option>`;
+
+  accountsData = acc.data || [];
+  renderAccounts();
+  updateEye();
 
   categories = cat.data || [];
   renderCategories();
