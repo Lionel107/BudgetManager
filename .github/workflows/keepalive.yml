@@ -1,30 +1,54 @@
 name: Supabase keep-alive
 
 # Empêche la mise en pause du projet Supabase (palier gratuit : pause après ~7 jours
-# sans activité). On interroge l'API REST tous les 3 jours → maintient la base active.
+# sans activité). Leçon d'août 2026 : un simple SELECT anonyme tous les 3 jours n'a
+# PAS suffi (projet mis en pause malgré des pings réussis). Désormais :
+#   - ping QUOTIDIEN,
+#   - vraie ÉCRITURE en base via la fonction keepalive_ping() (migration 20260923000009),
+#   - ré-activation du workflow à chaque exécution : GitHub désactive les workflows
+#     planifiés après 60 jours sans activité sur le dépôt, ce qui arrêterait le ping.
 
 on:
   schedule:
-    - cron: "0 6 */3 * *"   # tous les 3 jours à 06:00 UTC
+    - cron: "17 5 * * *"   # tous les jours à 05:17 UTC (minute non ronde = moins de retard GitHub)
   workflow_dispatch:        # permet aussi un lancement manuel depuis l'onglet Actions
+
+permissions:
+  actions: write            # nécessaire pour ré-activer le workflow (étape 3)
 
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Supabase REST
+      - name: Lecture (API REST)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
-          echo "Ping $SUPABASE_URL"
-          code=$(curl -sS -o /dev/null -w "%{http_code}" \
+          code=$(curl -sS --retry 3 --retry-all-errors --retry-delay 20 -o /dev/null -w "%{http_code}" \
             "$SUPABASE_URL/rest/v1/categories?select=id&limit=1" \
             -H "apikey: $SUPABASE_ANON_KEY" \
             -H "Authorization: Bearer $SUPABASE_ANON_KEY")
-          echo "HTTP $code"
-          # 200 (avec la RLS, renvoie [] sans session) = base bien active
-          if [ "$code" != "200" ]; then
-            echo "Réponse inattendue : $code" >&2
-            exit 1
-          fi
+          echo "Lecture : HTTP $code"
+          # 200 (avec la RLS, renvoie [] sans session) = API joignable
+          [ "$code" = "200" ] || { echo "Réponse inattendue : $code (projet en pause ?)" >&2; exit 1; }
+
+      - name: Écriture en base (keepalive_ping)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          body=$(curl -sS --retry 3 --retry-all-errors --retry-delay 20 -w "\n%{http_code}" -X POST \
+            "$SUPABASE_URL/rest/v1/rpc/keepalive_ping" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            -H "Content-Type: application/json" -d '{}')
+          code=$(echo "$body" | tail -n1)
+          echo "Écriture : HTTP $code — $(echo "$body" | head -n1)"
+          [ "$code" = "200" ] || { echo "keepalive_ping a échoué (migration 20260923000009 appliquée ?)" >&2; exit 1; }
+
+      - name: Garder ce workflow actif (limite GitHub des 60 jours)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/keepalive.yml/enable"

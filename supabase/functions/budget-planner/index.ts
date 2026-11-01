@@ -11,6 +11,7 @@
 // ============================================================================
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { askGemini, loadFullContext, PERSONA } from "../_shared/coach.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -137,12 +138,13 @@ Deno.serve(async (req: Request) => {
     const monthKeys = monthKeysWindow(now);
     const fromIso = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1)).toISOString();
 
-    const [txnRes, catRes, objRes, budRes, profRes] = await Promise.all([
+    const [txnRes, catRes, objRes, budRes, profRes, fullContext] = await Promise.all([
       supabase.from("transactions").select("amount, transaction_type, date, category:categories(name)").gte("date", fromIso),
       supabase.from("categories").select("name, is_essential, category_type").eq("is_active", true).eq("category_type", "EXPENSE"),
       supabase.from("objectives").select("title, type, target_amount, target_date, category:categories(name)").eq("is_active", true),
       supabase.from("budgets").select("budget_limit, category:categories(name)"),
       supabase.from("user_profiles").select("monthly_income, priorities, projects, never_cut, comfort, notes").maybeSingle(),
+      loadFullContext(supabase),
     ]);
 
     // Profil utilisateur (mémoire de l'assistant) — peut être absent.
@@ -243,7 +245,7 @@ Deno.serve(async (req: Request) => {
     // Affinage IA (remarques/chat, optimisation objectifs) si clé dispo et Gemini répond.
     if (geminiKey) {
       try {
-        const g = await askGeminiPlan(geminiKey, { monthlyIncome, profile, categories: catContext, existingCategories, objectives, remarks: effectiveRemarks, history, currentPlan });
+        const g = await askGeminiPlan(geminiKey, { monthlyIncome, profile, categories: catContext, existingCategories, objectives, remarks: effectiveRemarks, history, currentPlan, fullContext });
         reply = g.reply;
         newObjectives = g.newObjectives;
         // Garde-fou : l'épargne n'est pas une dépense -> on retire toute ligne "épargne".
@@ -289,15 +291,14 @@ async function askGeminiPlan(
   const convo = history
     .map((t: any) => `${t?.role === "assistant" ? "Assistant" : "Utilisateur"}: ${t?.text ?? ""}`)
     .join("\n");
-  const prompt = `Tu es un planificateur budgétaire bienveillant et réaliste (particulier, France, euros).
-Tu DIALOGUES avec l'utilisateur pour construire/affiner son budget mensuel.
-Contexte (chiffres déjà calculés sur 12 mois) :
+  const prompt = `Dans cette conversation, tu construis et affines avec l'utilisateur son budget MENSUEL par catégorie.
+Contexte (chiffres déjà calculés sur 12 mois ; "fullContext" = l'intégralité de son profil et de son budget : comptes, charges fixes, marge du mois, budgets en cours, dernières opérations) :
 ${JSON.stringify(ctx)}
 ${convo ? `\nConversation jusqu'ici :\n${convo}\n` : ""}
 
 Règles :
 - PROFIL DE L'UTILISATEUR (champ "profile", peut être null) : c'est sa mémoire. RESPECTE-le absolument. "priorities" = ce qui compte le plus (protège ces postes) ; "neverCut" = dépenses à NE PAS réduire (laisse-les confortables même s'il faut serrer ailleurs) ; "projects" = projets à venir (anticipe l'épargne correspondante) ; "comfort" = train de vie souhaité (donne le ton général, plus ou moins serré) ; "notes" = infos libres. Le profil PRIME sur les simples moyennes.
-- OBJECTIF PRINCIPAL : construis le budget IDÉAL qui permet d'ATTEINDRE les "objectives", quitte à réduire le superflu. Ne te contente PAS de recopier les habitudes ("monthlyAverage") : sers-t'en pour connaître l'utilisateur, mais ajuste pour dégager l'épargne nécessaire aux objectifs.
+- OBJECTIF PRINCIPAL : construis le budget IDÉAL qui permet d'ATTEINDRE les "objectives", quitte à réduire le superflu. Reste RÉALISTE : un budget intenable ne sert à rien ; ne rabote pas les essentiels ni "neverCut", et garde une enveloppe plaisir raisonnable. Ne te contente PAS de recopier les habitudes ("monthlyAverage") : sers-t'en pour connaître l'utilisateur, mais ajuste pour dégager l'épargne nécessaire aux objectifs.
 - ⚠️ L'ÉPARGNE N'EST PAS UNE DÉPENSE. Ne crée JAMAIS de catégorie "Épargne" / "Savings" / "Économies" dans le plan. L'épargne = monthlyIncome − (somme des budgets de dépense). Pour dégager X €/mois d'épargne (demandé via "objectives" OU via "remarks", ex. « je veux 1500 € d'épargne »), tu dois RÉDUIRE les budgets de dépense (les non essentiels d'abord) jusqu'à ce que monthlyIncome − somme(plan) ≥ X. Tu ne rajoutes PAS de ligne d'épargne.
 - Propose un budget MENSUEL par catégorie de dépense, réaliste.
 - Utilise EN PRIORITÉ les catégories de "existingCategories" (réutilise leur nom EXACT).
@@ -308,53 +309,33 @@ Règles :
 - Intègre les "objectives" : pour un objectif SAVINGS (épargner targetAmount d'ici targetDate), dégage la marge mensuelle nécessaire (revenu - dépenses). Pour SPENDING_LIMIT, respecte le plafond sur la catégorie visée.
 - La somme des budgets doit laisser une épargne cohérente vs monthlyIncome.
 - Si "remarks" (le dernier message de l'utilisateur) est fourni, AJUSTE le "currentPlan" en conséquence (garde les montants qu'il a édités sauf s'il demande de les changer). Tiens compte de la "Conversation jusqu'ici".
-- Dans "reply", réponds DIRECTEMENT et brièvement à l'utilisateur, comme dans une conversation : dis ce que tu as changé et pourquoi, ou pose UNE question si tu as besoin d'une précision. Ton chaleureux, tutoie-le. Pas de listes à puces dans "reply".
+- Dans "reply", réponds DIRECTEMENT et brièvement à l'utilisateur, comme dans une conversation, avec ta personnalité : dis ce que tu as changé et pourquoi, ou pose UNE question si tu as besoin d'une précision. Pas de listes à puces dans "reply".
 - "newObjectives" : SEULEMENT si la conversation (ou le profil) révèle un BUT chiffré et concret que l'utilisateur n'a PAS encore formalisé (ex. « je veux épargner 3000 € pour décembre », « ne pas dépasser 200 € de resto »). Ne propose JAMAIS un objectif déjà présent dans "objectives". Dans le doute, laisse [] (tableau vide). type = "SAVINGS" (épargner un montant pour une date) ou "SPENDING_LIMIT" (plafond sur une catégorie). targetDate au format AAAA-MM-JJ ou null. category = nom de catégorie pour un plafond, sinon null.
 Réponds UNIQUEMENT en JSON valide :
 {"reply": "ta réponse conversationnelle à l'utilisateur (2-4 phrases)", "summary": "1 phrase de synthèse du plan et de l'épargne dégagée", "plan": [{"category": "<nom de catégorie, existante ou nouvelle>", "monthlyAmount": <nombre>, "rationale": "courte justification"}], "newObjectives": [{"title": "<titre court>", "type": "SAVINGS|SPENDING_LIMIT", "targetAmount": <nombre>, "targetDate": "AAAA-MM-JJ ou null", "category": "<nom ou null>"}]}`;
 
-  // Cascade de modèles : bascule au suivant si l'un est en quota (429) ou indisponible (503).
-  const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
-  const reqBody = JSON.stringify({
-    contents: [{ parts: [{ text: prompt }] }],
-    // thinkingBudget: 0 -> désactive le "raisonnement" (gemini-2.5) = réponse rapide
-    generationConfig: { temperature: 0.6, responseMimeType: "application/json", thinkingConfig: { thinkingBudget: 0 } },
-  });
-  let lastErr = "";
-  for (const model of models) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
-    const resp = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: reqBody });
-    if (resp.ok) {
-      const data = await resp.json();
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-      const parsed = JSON.parse(text);
-      return {
-        reply: String(parsed.reply ?? ""),
-        summary: String(parsed.summary ?? ""),
-        plan: Array.isArray(parsed.plan)
-          ? parsed.plan.map((p: any) => ({
-              category: String(p.category ?? ""),
-              monthlyAmount: Number(p.monthlyAmount) || 0,
-              rationale: String(p.rationale ?? ""),
-            }))
-          : [],
-        newObjectives: Array.isArray(parsed.newObjectives)
-          ? parsed.newObjectives
-              .filter((o: any) => o && o.title && (o.type === "SAVINGS" || o.type === "SPENDING_LIMIT") && Number(o.targetAmount) > 0)
-              .map((o: any) => ({
-                title: String(o.title),
-                type: String(o.type),
-                targetAmount: Number(o.targetAmount) || 0,
-                targetDate: o.targetDate && /^\d{4}-\d{2}-\d{2}$/.test(String(o.targetDate)) ? String(o.targetDate) : null,
-                category: o.category ? String(o.category) : null,
-              }))
-          : [],
-      };
-    }
-    const errBody = await resp.text().catch(() => "");
-    lastErr = `HTTP ${resp.status} (${model}) ${errBody.slice(0, 120)}`;
-    if (resp.status !== 429 && resp.status !== 503) throw new Error("Gemini " + lastErr);
-    // 429/503 → on tente le modèle suivant
-  }
-  throw new Error("Gemini : tous les modèles indisponibles — " + lastErr);
+  const text = await askGemini(key, PERSONA, [{ role: "user", text: prompt }], { temperature: 0.6, json: true });
+  const parsed = JSON.parse(text);
+  return {
+    reply: String(parsed.reply ?? ""),
+    summary: String(parsed.summary ?? ""),
+    plan: Array.isArray(parsed.plan)
+      ? parsed.plan.map((p: any) => ({
+          category: String(p.category ?? ""),
+          monthlyAmount: Number(p.monthlyAmount) || 0,
+          rationale: String(p.rationale ?? ""),
+        }))
+      : [],
+    newObjectives: Array.isArray(parsed.newObjectives)
+      ? parsed.newObjectives
+          .filter((o: any) => o && o.title && (o.type === "SAVINGS" || o.type === "SPENDING_LIMIT") && Number(o.targetAmount) > 0)
+          .map((o: any) => ({
+            title: String(o.title),
+            type: String(o.type),
+            targetAmount: Number(o.targetAmount) || 0,
+            targetDate: o.targetDate && /^\d{4}-\d{2}-\d{2}$/.test(String(o.targetDate)) ? String(o.targetDate) : null,
+            category: o.category ? String(o.category) : null,
+          }))
+      : [],
+  };
 }

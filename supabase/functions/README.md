@@ -1,5 +1,13 @@
 # Edge Functions — Supabase
 
+> **Module partagé `_shared/coach.ts`** : personnalité commune des agents IA (`PERSONA`),
+> chargement du **contexte complet** de l'utilisateur à chaque appel (`loadFullContext` :
+> profil, comptes, budgets + rythme, objectifs, charges fixes, marge du mois, dépenses
+> récentes) et appel Gemini multi-tours (`askGemini`). Utilisé par `analyst`,
+> `budget-planner` et `financial-advisor`.
+> ⚠️ Déployer **via la CLI** (`supabase functions deploy <nom>`), qui embarque `_shared`
+> automatiquement. Un copier-coller du seul `index.ts` dans le Dashboard ne suffit plus.
+
 ## `financial-advisor`
 
 Analyse les 12 derniers mois de l'utilisateur, calcule saisonnalité + budget annuel

@@ -83,8 +83,9 @@ fun AnalystScreen() {
         SectionHeader(title = "Analyste")
         Spacer(Modifier.height(4.dp))
         Text(
-            "Ton coach du respect du budget : bilan du mois et discussion à la demande. " +
-                "Les chiffres sont calculés localement ; l'IA les commente.",
+            "Ton copilote budget : parle-lui comme à un pote. À chaque message, il connaît " +
+                "tout ton profil et ton budget (comptes, charges fixes, objectifs, dépenses récentes). " +
+                "Les chiffres sont calculés par l'app ; l'IA les commente.",
             style = MaterialTheme.typography.bodyMedium, color = NeumorphicTextSecondary
         )
         Spacer(Modifier.height(16.dp))
@@ -159,11 +160,12 @@ fun AnalystScreen() {
         // ---- Chat ----
         Spacer(Modifier.height(14.dp))
         NeumorphicCard(modifier = Modifier.fillMaxWidth()) {
-            Text("💬 Pose une question", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = NeumorphicPrimary)
+            Text("💬 Discute avec ton copilote",style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = NeumorphicPrimary)
             Spacer(Modifier.height(6.dp))
             if (messages.isEmpty()) {
                 Text(
-                    "Ex. « Est-ce que je peux me permettre 200 € de loisirs ce mois-ci ? »",
+                    "Ex. « Je peux me faire un resto ce week-end ? », « Mois compliqué, on fait comment ? », " +
+                        "« Où je peux vraiment économiser ? »",
                     style = MaterialTheme.typography.bodySmall, color = NeumorphicTextTertiary
                 )
             }
@@ -199,7 +201,7 @@ fun AnalystScreen() {
                     value = input,
                     onValueChange = { input = it },
                     label = "",
-                    placeholder = "Ta question…",
+                    placeholder = "Écris-lui…",
                     modifier = Modifier.weight(1f)
                 )
                 Spacer(Modifier.width(10.dp))

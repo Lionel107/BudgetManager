@@ -1,21 +1,26 @@
 // ============================================================================
-// Edge Function : analyst  —  Agent Analyste (coach du respect du budget)
+// Edge Function : analyst  —  Agent Analyste (le copilote avec qui on discute)
 //
 // Deux modes :
-//   • mode "bilan" : rédige un bilan mensuel bienveillant à partir des chiffres
-//     DÉTERMINISTES déjà calculés côté client (respect des budgets + objectifs).
-//   • mode "chat"  : répond à une question de l'utilisateur en s'appuyant sur ce
-//     même contexte + l'historique de conversation.
+//   • mode "bilan" : rédige un bilan mensuel.
+//   • mode "chat"  : répond librement à l'utilisateur (conversation multi-tours).
 //
-// PRINCIPE : l'IA ne calcule PAS. Tous les montants viennent du `context` fourni
-// par le client (source de vérité = AnalysisRepository, déterministe). L'IA se
-// contente de rédiger / arbitrer / conseiller.
+// CONTEXTE COMPLET À CHAQUE APPEL : la fonction recharge elle-même, depuis la base
+// (RLS via le JWT de l'utilisateur), l'intégralité de son profil et de son budget
+// (voir _shared/coach.ts → loadFullContext). Le `context` envoyé par le client
+// (calculs de l'app : états des budgets, progression des objectifs) est ajouté en
+// complément sous "appCalculations".
+//
+// PRINCIPE : l'IA ne calcule PAS. Tous les montants sont déterministes.
 //
 // Clé Gemini = PAR UTILISATEUR (corps { geminiKey }), utilisée puis jetée, jamais
 // stockée. Sans clé → 422 (le client affiche alors le bilan chiffré brut).
 //
 // Déploiement : supabase functions deploy analyst   (aucun secret à définir)
 // ============================================================================
+
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { askGemini, ChatTurn, loadFullContext, PERSONA } from "../_shared/coach.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -30,32 +35,52 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-interface ChatTurn { role: string; text: string }
+/** Nombre max de tours d'historique renvoyés à Gemini (les plus récents). */
+const MAX_HISTORY = 20;
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    if (!req.headers.get("Authorization")) return json({ error: "Non authentifié." }, 401);
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) return json({ error: "Non authentifié." }, 401);
 
     let body: any = {};
     try { body = await req.json(); } catch { /* corps vide */ }
 
     const geminiKey: string | undefined = body?.geminiKey;
     const mode: string = body?.mode === "chat" ? "chat" : "bilan";
-    const context = body?.context ?? {};
+    const clientContext = body?.context ?? null;
     const history: ChatTurn[] = Array.isArray(body?.history) ? body.history : [];
-    const question: string = String(body?.question ?? "");
+    const question: string = String(body?.question ?? "").trim();
 
     if (!geminiKey) {
       return json({ error: "Ajoute ta clé Gemini dans les Réglages pour discuter avec l'analyste." }, 422);
     }
 
-    const prompt = mode === "chat"
-      ? buildChatPrompt(context, history, question)
-      : buildBilanPrompt(context);
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_ANON_KEY")!,
+      { global: { headers: { Authorization: authHeader } } },
+    );
+    const full = await loadFullContext(supabase);
+    const system = `${PERSONA}
 
-    const reply = await askGemini(geminiKey, prompt);
+CONTEXTE COMPLET DE L'UTILISATEUR (rechargé à l'instant, chiffres déterministes) :
+${JSON.stringify({ ...full, appCalculations: clientContext })}`;
+
+    let turns: ChatTurn[];
+    if (mode === "chat") {
+      // L'historique peut déjà contenir la question en dernier tour : on évite le doublon.
+      const past = history.slice(-MAX_HISTORY);
+      const last = past[past.length - 1];
+      if (last && last.role === "user" && last.text.trim() === question) past.pop();
+      turns = [...past, { role: "user", text: question || "Salut !" }];
+    } else {
+      turns = [{ role: "user", text: BILAN_REQUEST }];
+    }
+
+    const reply = await askGemini(geminiKey, system, turns, { temperature: mode === "chat" ? 0.8 : 0.7 });
     return json({ reply });
   } catch (e) {
     console.error(e);
@@ -63,69 +88,9 @@ Deno.serve(async (req: Request) => {
   }
 });
 
-const SYSTEM = `Tu es l'analyste budgétaire personnel de l'utilisateur (particulier en France, en euros).
-Ton rôle : vérifier s'il respecte ses budgets et ses objectifs, et l'aider concrètement à les tenir.
-Règles STRICTES :
-- Tous les chiffres te sont FOURNIS (déjà calculés). Ne recalcule rien, ne invente aucun montant.
-- Ton bienveillant, encourageant, jamais moralisateur ni alarmiste. Tutoie l'utilisateur.
-- Raisonne sur l'ANNÉE quand c'est pertinent (un pic isolé n'est pas un problème si le cumul reste sain).
-- Sois concret : propose des actions précises (quelle catégorie réduire, de combien).
-- Reste bref et lisible. Utilise un peu de Markdown (gras, listes) mais pas d'excès.`;
-
-function buildBilanPrompt(context: unknown): string {
-  return `${SYSTEM}
-
-Voici le point de la situation (chiffres déterministes) :
-${JSON.stringify(context)}
-
-Rédige un BILAN du mois en Markdown, structuré ainsi :
-1. Une phrase d'accroche chaleureuse sur la tendance générale.
-2. **Budgets** : ceux qui sont respectés / à surveiller / dépassés (nomme-les).
-3. **Objectifs** : où en est chaque objectif, et quoi faire pour ceux en retard.
-4. **3 actions concrètes** à faire ce mois-ci (liste à puces).
+const BILAN_REQUEST = `Fais-moi le BILAN de mon mois en cours, en Markdown, structuré ainsi :
+1. Une phrase d'accroche sur la tendance générale (sincère : positive si ça va, franche si ça coince).
+2. **Budgets** : seulement ceux qui posent un vrai problème (dépassés, proches de la limite ou au rythme trop rapide, hors essentiels) et, en une ligne, ceux qui sont bien tenus. Ne commente pas les dépenses qui respectent leur budget.
+3. **Objectifs** : où j'en suis, et quoi faire pour ceux en retard.
+4. **Jusqu'à 3 actions concrètes et chiffrées** pour ce mois (moins s'il n'y a rien d'utile à dire : si tout va bien, dis-le simplement).
 Ne dépasse pas ~200 mots.`;
-}
-
-function buildChatPrompt(context: unknown, history: ChatTurn[], question: string): string {
-  const convo = history
-    .map((t) => `${t.role === "assistant" ? "Analyste" : "Utilisateur"}: ${t.text}`)
-    .join("\n");
-  return `${SYSTEM}
-
-Contexte financier actuel (chiffres déterministes) :
-${JSON.stringify(context)}
-
-${convo ? `Conversation jusqu'ici :\n${convo}\n` : ""}
-Nouvelle question de l'utilisateur : ${question}
-
-Réponds directement, en Markdown léger, sans te répéter.`;
-}
-
-async function askGemini(key: string, prompt: string): Promise<string> {
-  // Cascade : bascule au modèle suivant si quota (429) ou indisponible (503).
-  const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
-  const reqBody = JSON.stringify({
-    contents: [{ parts: [{ text: prompt }] }],
-    // thinkingBudget: 0 → pas de "raisonnement" long = réponse rapide
-    generationConfig: { temperature: 0.7, thinkingConfig: { thinkingBudget: 0 } },
-  });
-  let lastErr = "";
-  for (const model of models) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
-    const resp = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: reqBody,
-    });
-    if (resp.ok) {
-      const data = await resp.json();
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-      if (text) return String(text);
-      lastErr = `réponse vide (${model})`;
-      continue;
-    }
-    lastErr = `HTTP ${resp.status} (${model})`;
-    if (resp.status !== 429 && resp.status !== 503) throw new Error("Gemini " + lastErr);
-  }
-  throw new Error("Gemini : tous les modèles indisponibles — " + lastErr);
-}

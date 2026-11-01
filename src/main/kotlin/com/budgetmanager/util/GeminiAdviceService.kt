@@ -306,9 +306,10 @@ class GeminiAdviceService {
      * we fall back to the next. Newest/most capable first.
      */
     private val modelFallbacks = listOf(
-        "gemini-2.5-flash",
-        "gemini-2.0-flash",
-        "gemini-1.5-flash"
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3.1-flash-lite",
+        "gemini-2.5-flash"
     )
 
     private fun callGemini(apiKey: String, prompt: String): String {
@@ -359,8 +360,9 @@ class GeminiAdviceService {
                 lastError = responseBody
                 AppLogger.warn("GeminiAdvice", "Model $model returned $status, trying next fallback")
 
-                // Only retry on transient errors. For auth/quota issues, give up immediately.
-                if (status !in listOf(429, 500, 502, 503, 504)) {
+                // Retry on transient errors and on retired models / settings refused by one
+                // model (404/400). Give up immediately on auth issues.
+                if (status !in listOf(400, 404, 429, 500, 502, 503, 504)) {
                     error(humanError(status, responseBody))
                 }
             } catch (e: IllegalStateException) {

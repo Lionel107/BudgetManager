@@ -12,6 +12,7 @@
 // ============================================================================
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { askGemini as askCoach, loadFullContext, PERSONA } from "../_shared/coach.ts";
 
 const MOIS_FR = ["", "janvier", "février", "mars", "avril", "mai", "juin",
   "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
@@ -131,7 +132,7 @@ Deno.serve(async (req: Request) => {
     let advice: { summary: string; tips: string[] } | null = null;
     if (geminiKey) {
       try {
-        advice = await askGemini(geminiKey, analysis);
+        advice = await askGemini(geminiKey, analysis, await loadFullContext(supabase));
       } catch (e) {
         console.error("Gemini:", e);
       }
@@ -168,37 +169,23 @@ function median(arr: number[]): number {
 async function askGemini(
   key: string,
   analysis: unknown,
+  fullContext: unknown,
 ): Promise<{ summary: string; tips: string[] }> {
-  const prompt = `Tu es un accompagnant de gestion budgétaire bienveillant et concret, pour un particulier en France (euros).
-Voici l'analyse déterministe de ses 12 derniers mois (montants déjà calculés, ne les recalcule pas) :
+  const prompt = `Voici l'analyse déterministe de mes 12 derniers mois (montants déjà calculés, ne les recalcule pas) :
 ${JSON.stringify(analysis)}
 
+Et l'intégralité de mon profil et de mon budget actuel :
+${JSON.stringify(fullContext)}
+
 Rédige un accompagnement PERSONNALISÉ en français. Insiste sur la SAISONNALITÉ : les catégories marquées "seasonal" ont des dépenses concentrées sur certains mois (champ peakMonths, ex. assurance en mars, vacances l'été, cadeaux en décembre). Recommande de mettre de côté chaque mois le montant "seasonalProvision" (€/mois) pour absorber ces pics sans être surpris. Utilise "monthlyAverage" pour parler du coût lissé d'une catégorie.
+Les conseils doivent viser les vrais leviers (pas de remarque sur ce qui est essentiel ou déjà bien tenu).
 Réponds UNIQUEMENT en JSON valide, sans texte autour, au format :
 {"summary": "2-3 phrases de synthèse chaleureuse et utile", "tips": ["conseil 1", "conseil 2", "conseil 3", "conseil 4"]}`;
 
-  // Cascade de modèles : bascule au suivant si l'un est en quota (429) ou indisponible (503).
-  const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
-  const reqBody = JSON.stringify({
-    contents: [{ parts: [{ text: prompt }] }],
-    // thinkingBudget: 0 -> désactive le "raisonnement" (gemini-2.5) = réponse rapide
-    generationConfig: { temperature: 0.7, responseMimeType: "application/json", thinkingConfig: { thinkingBudget: 0 } },
-  });
-  let lastErr = "";
-  for (const model of models) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
-    const resp = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: reqBody });
-    if (resp.ok) {
-      const data = await resp.json();
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-      const parsed = JSON.parse(text);
-      return {
-        summary: String(parsed.summary ?? ""),
-        tips: Array.isArray(parsed.tips) ? parsed.tips.map((t: unknown) => String(t)) : [],
-      };
-    }
-    lastErr = `HTTP ${resp.status} (${model})`;
-    if (resp.status !== 429 && resp.status !== 503) throw new Error("Gemini " + lastErr);
-  }
-  throw new Error("Gemini : tous les modèles indisponibles — " + lastErr);
+  const text = await askCoach(key, PERSONA, [{ role: "user", text: prompt }], { temperature: 0.7, json: true });
+  const parsed = JSON.parse(text);
+  return {
+    summary: String(parsed.summary ?? ""),
+    tips: Array.isArray(parsed.tips) ? parsed.tips.map((t: unknown) => String(t)) : [],
+  };
 }
