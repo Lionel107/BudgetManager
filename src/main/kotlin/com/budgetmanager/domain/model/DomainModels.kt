@@ -123,6 +123,22 @@ data class Objective(
 enum class ObjectiveType { SAVINGS, SPENDING_LIMIT }
 
 /**
+ * Régularisation : un compte recalé sur son solde réel. L'écart n'est ni une dépense
+ * ni un revenu (budgets et stats restent justes) ; il est seulement tracé ici.
+ */
+data class AccountRegularization(
+    val id: Long = 0,
+    val accountId: Long,
+    val accountName: String? = null,
+    val regularizedAt: LocalDateTime,
+    val previousBalance: BigDecimal,
+    val realBalance: BigDecimal,
+    /** realBalance − previousBalance (négatif = de l'argent est parti sans être saisi). */
+    val difference: BigDecimal,
+    val note: String? = null
+)
+
+/**
  * Profil persistant et éditable de l'utilisateur — ce que l'agent Constructeur
  * doit connaître pour bâtir le budget idéal. Rempli par l'accueil guidé, affinable.
  */

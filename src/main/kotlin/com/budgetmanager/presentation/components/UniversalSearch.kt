@@ -39,6 +39,7 @@ sealed class SearchResult(val label: String, val subtitle: String) {
 private val SCREEN_INDEX = listOf(
     SearchResult.ScreenResult(Screen.HOME, "Accueil", "Tableau de bord"),
     SearchResult.ScreenResult(Screen.ACCOUNTS, "Comptes", "Gerer les comptes"),
+    SearchResult.ScreenResult(Screen.REGULARIZATION, "Regularisation", "Remettre les comptes a leur solde reel"),
     SearchResult.ScreenResult(Screen.TRANSACTIONS, "Transactions", "Liste des transactions"),
     SearchResult.ScreenResult(Screen.ADD_TRANSACTION, "Nouvelle transaction", "Ajouter une transaction"),
     SearchResult.ScreenResult(Screen.BUDGETS, "Budgets", "Gerer les budgets"),

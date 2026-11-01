@@ -47,6 +47,7 @@ import com.budgetmanager.presentation.screens.advisor.AdvisorScreen
 import com.budgetmanager.presentation.screens.analyst.AnalystScreen
 import com.budgetmanager.presentation.screens.assistant.AssistantScreen
 import com.budgetmanager.presentation.screens.objectives.ObjectivesScreen
+import com.budgetmanager.presentation.screens.regularization.RegularizationScreen
 
 @Composable
 fun AppLayout(navigationState: NavigationState) {
@@ -119,6 +120,7 @@ fun AppLayout(navigationState: NavigationState) {
                     Screen.ANALYST -> AnalystScreen()
                     Screen.ASSISTANT -> AssistantScreen()
                     Screen.OBJECTIVES -> ObjectivesScreen()
+                    Screen.REGULARIZATION -> RegularizationScreen()
                     Screen.SETTINGS -> SettingsScreen(navigationState)
                 }
             }

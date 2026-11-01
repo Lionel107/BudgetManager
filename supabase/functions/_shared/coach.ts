@@ -29,6 +29,7 @@ L'aider à gérer son budget de façon optimale : tenir ses budgets, atteindre s
 7. S'il exprime du stress, de la fatigue ou un coup dur : une phrase sincère d'abord, puis l'aide concrète. Jamais de morale ni de culpabilisation.
 8. Félicite brièvement ce qui va bien.
 9. Réponses courtes : 2 à 5 phrases, sauf si on te demande plus. Une seule question à la fois.
+10. Une « régularisation » recale un compte sur son solde réel après une période de compta mal suivie. Ce n'est ni une dépense ni un revenu : ne la compte jamais dans le mois. Un écart négatif veut dire que des dépenses n'ont pas été saisies : ne le reproche pas, salue plutôt la remise à plat, et au besoin suggère en douceur de saisir au fil de l'eau.
 
 # Exemples de ton
 Utilisateur : Je peux me faire un resto à 30 € ce soir ?
@@ -99,7 +100,8 @@ export async function loadFullContext(supabase: any): Promise<any> {
     try { const r = await q; return (r?.data ?? null) as any; } catch { return null; }
   };
 
-  const [prof, accounts, cats, budgets, objectives, recurring, txns] = await Promise.all([
+  const since180 = new Date(now.getTime() - 180 * 86400000);
+  const [prof, accounts, cats, budgets, objectives, recurring, txns, regs] = await Promise.all([
     safe(supabase.from("user_profiles").select("monthly_income, priorities, projects, never_cut, comfort, notes").maybeSingle()),
     safe(supabase.from("accounts").select("name, account_type, balance").eq("is_active", true).order("display_order")),
     safe(supabase.from("categories").select("name, category_type, is_essential").eq("is_active", true)),
@@ -107,6 +109,7 @@ export async function loadFullContext(supabase: any): Promise<any> {
     safe(supabase.from("objectives").select("title, type, target_amount, target_date, created_at, category:categories(name)").eq("is_active", true)),
     safe(supabase.from("recurring_transactions").select("title, amount, transaction_type, frequency_type, repeat_interval, next_due_date, end_date, category:categories(name)").eq("is_active", true)),
     safe(supabase.from("transactions").select("title, amount, transaction_type, date, category:categories(name)").gte("date", windowStart.toISOString()).order("date", { ascending: false })),
+    safe(supabase.from("account_regularizations").select("regularized_at, previous_balance, real_balance, difference, note, account:accounts(name)").gte("regularized_at", since180.toISOString()).order("regularized_at", { ascending: false })),
   ]);
 
   const tx = (txns ?? []) as any[];
@@ -296,6 +299,15 @@ export async function loadFullContext(supabase: any): Promise<any> {
     fixedCharges: { monthlyTotal: fixedChargesMonthly, items: recurringList },
     spendingByCategory: spendingHistory,
     recentTransactions,
+    // Comptes recalés sur leur solde réel (6 derniers mois) : ni dépense ni revenu.
+    regularizations: ((regs ?? []) as any[]).map((r) => ({
+      date: String(r.regularized_at).slice(0, 10),
+      account: r.account?.name ?? "?",
+      previousBalance: round2(Number(r.previous_balance) || 0),
+      realBalance: round2(Number(r.real_balance) || 0),
+      difference: round2(Number(r.difference) || 0),
+      note: r.note ?? null,
+    })),
   };
 }
 
@@ -399,6 +411,17 @@ export function buildBriefing(c: any, withRecent = false): string {
   if (habits.length) {
     L.push("", `## Habitudes de dépense (moyenne sur ${c.history.monthsCovered} mois)`);
     habits.forEach((h: any) => L.push(`- ${h.category}${h.essential ? " (essentiel)" : ""} : ~${eur(h.monthlyAverage)}/mois, ${eur(h.thisMonth)} ce mois`));
+  }
+
+  const regs = c.regularizations ?? [];
+  if (regs.length) {
+    const last = regs[0].date;
+    const total = regs.filter((r: any) => r.date === last).reduce((s: number, r: any) => s + r.difference, 0);
+    L.push("", "## Régularisations (comptes recalés sur leur solde réel — ni dépense ni revenu)");
+    regs.slice(0, 8).forEach((r: any) =>
+      L.push(`- ${r.date} ${r.account} : ${eur(r.previousBalance)} → ${eur(r.realBalance)} (écart ${r.difference > 0 ? "+" : ""}${eur(r.difference)})${r.note ? ` — ${r.note}` : ""}`));
+    L.push(`- Dernière remise à plat le ${last} : les soldes des comptes sont justes depuis. Les données d'avant peuvent être incomplètes` +
+      (total < 0 ? ` (environ ${eur(-total)} de dépenses n'avaient pas été saisies), donc les moyennes d'habitudes peuvent sous-estimer les vraies dépenses.` : "."));
   }
 
   if (withRecent && c.recentTransactions.length) {

@@ -41,7 +41,7 @@ data class SidebarItem(
 
 /**
  * Sidebar items grouped logically:
- *   1. Quotidien (usage frequent)     : Accueil, Transactions, Comptes
+ *   1. Quotidien (usage frequent)     : Accueil, Transactions, Comptes, Régularisation
  *   2. Suivi & planification          : Budgets, Recurrents, Categories, Templates
  *   3. Analyse & motivation           : Analyse, Defis, Badges
  *   4. Configuration & donnees        : Taux de change, Importer, Exporter
@@ -53,6 +53,7 @@ private val mainNavItems = listOf(
     SidebarItem(Screen.HOME, "Accueil", Icons.Outlined.Home, Icons.Filled.Home),
     SidebarItem(Screen.TRANSACTIONS, "Transactions", Icons.Outlined.Receipt, Icons.Filled.Receipt),
     SidebarItem(Screen.ACCOUNTS, "Comptes", Icons.Outlined.AccountBalance, Icons.Filled.AccountBalance),
+    SidebarItem(Screen.REGULARIZATION, "Régularisation", Icons.Outlined.Balance, Icons.Filled.Balance),
     // --- Suivi & planification ---
     SidebarItem(Screen.BUDGETS, "Budgets", Icons.Outlined.Wallet, Icons.Filled.Wallet),
     SidebarItem(Screen.OBJECTIVES, "Objectifs", Icons.Outlined.Flag, Icons.Filled.Flag),
@@ -73,7 +74,7 @@ private val mainNavItems = listOf(
 )
 
 /** Indices of the FIRST item of each logical group → render a separator before them. */
-private val groupBoundaries = setOf(3, 8, 14)
+private val groupBoundaries = setOf(4, 9, 15)
 
 private val bottomNavItem = SidebarItem(Screen.SETTINGS, "Paramètres", Icons.Outlined.Settings, Icons.Filled.Settings)
 

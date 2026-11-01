@@ -40,4 +40,5 @@ val appModule = module {
     single { com.budgetmanager.data.repository.SplitRepository(get()) }
     single { com.budgetmanager.data.repository.ChallengeRepository(get()) }
     single { com.budgetmanager.data.repository.ExchangeRateRepository(get()) }
+    single { com.budgetmanager.data.repository.RegularizationRepository(get(), get()) }
 }

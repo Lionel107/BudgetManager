@@ -216,3 +216,15 @@ data class UserProfileDto(
     val notes: String? = null,
     @SerialName("onboarding_done") val onboardingDone: Boolean = false
 )
+
+@Serializable
+data class AccountRegularizationDto(
+    val id: Long? = null,
+    @SerialName("account_id") val accountId: Long,
+    @SerialName("regularized_at") val regularizedAt: String? = null,
+    @SerialName("previous_balance") @Serializable(with = BigDecimalSerializer::class) val previousBalance: BigDecimal,
+    @SerialName("real_balance") @Serializable(with = BigDecimalSerializer::class) val realBalance: BigDecimal,
+    @Serializable(with = BigDecimalSerializer::class) val difference: BigDecimal,
+    val note: String? = null,
+    @SerialName("account") val account: AccountRef? = null
+)
