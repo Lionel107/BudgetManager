@@ -67,12 +67,21 @@ Deno.serve(async (req: Request) => {
     }
 
     // ---- Statistiques déterministes ----
+    // Sur les mois COMPLETS réellement couverts (le mois en cours fausserait les moyennes,
+    // et diviser par 12 avec 6 mois d'historique les couperait de moitié).
+    const curKey = monthKeys[monthKeys.length - 1];
+    const oldestKey = (txns as any[]).reduce((k, t) => (String(t.date).slice(0, 7) < k ? String(t.date).slice(0, 7) : k), curKey);
+    const pastKeys = monthKeys.filter((k) => k >= oldestKey && k !== curKey);
+    const keys = pastKeys.length > 0 ? pastKeys : [curKey];
+    const monthsCovered = keys.length;
+
     let income = 0, expenses = 0;
     const perCat: Record<string, { total: number; byMonth: Record<string, number> }> = {};
 
     for (const t of txns as any[]) {
       const amt = Number(t.amount) || 0;
       const monthKey = String(t.date).slice(0, 7); // YYYY-MM
+      if (!keys.includes(monthKey)) continue;
       if (t.transaction_type === "INCOME") { income += amt; continue; }
       if (t.transaction_type !== "EXPENSE") continue; // ignore les transferts
       expenses += amt;
@@ -84,7 +93,7 @@ Deno.serve(async (req: Request) => {
 
     const categories = Object.entries(perCat).map(([name, d]) => {
       // Valeurs par mois sur la fenêtre (mois sans dépense = 0) -> "mois typique" = médiane
-      const values = monthKeys.map((k) => d.byMonth[k] ?? 0);
+      const values = keys.map((k) => d.byMonth[k] ?? 0);
       const med = median(values);
 
       // Un mois est un PIC s'il dépasse nettement le mois typique
@@ -100,23 +109,23 @@ Deno.serve(async (req: Request) => {
       const seasonal = d.total >= 150 && spikeIdx.length >= 1 && spikeIdx.length <= 4 && excess >= 200;
 
       const peakMonths = seasonal
-        ? spikeIdx.map(({ i }) => MOIS_FR[parseInt(monthKeys[i].slice(5, 7), 10)])
+        ? spikeIdx.map(({ i }) => MOIS_FR[parseInt(keys[i].slice(5, 7), 10)])
         : [];
 
       return {
         name,
         annualTotal: round2(d.total),
-        monthlyAverage: round2(d.total / 12),       // pour le budget annuel lissé
+        monthlyAverage: round2(d.total / monthsCovered),       // pour le budget lissé
         seasonal,
         peakMonths,
-        seasonalProvision: seasonal ? round2(excess / 12) : 0, // à mettre de côté chaque mois
+        seasonalProvision: seasonal ? round2(excess / monthsCovered) : 0, // à mettre de côté chaque mois
       };
     }).sort((a, b) => b.annualTotal - a.annualTotal);
 
     const seasonal = categories.filter((c) => c.seasonal);
     const savings = income - expenses;
     const analysis = {
-      period: { from: fromIso.slice(0, 10), to: now.toISOString().slice(0, 10), months: 12 },
+      period: { from: `${keys[0]}-01`, to: now.toISOString().slice(0, 10), months: monthsCovered },
       totals: {
         income: round2(income),
         expenses: round2(expenses),
@@ -171,7 +180,7 @@ async function askGemini(
   analysis: unknown,
   briefing: string,
 ): Promise<{ summary: string; tips: string[] }> {
-  const prompt = `Voici l'analyse déterministe de mes 12 derniers mois (montants déjà calculés, ne les recalcule pas) :
+  const prompt = `Voici l'analyse déterministe de mes derniers mois complets (period.months mois ; montants déjà calculés, ne les recalcule pas) :
 ${JSON.stringify(analysis)}
 
 Et l'intégralité de mon profil et de mon budget actuel :

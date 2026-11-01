@@ -88,7 +88,7 @@ Deno.serve(async (req: Request) => {
 
 const BILAN_REQUEST = `Fais-moi le BILAN de mon mois en cours, en Markdown, structuré ainsi :
 1. Une phrase d'accroche sur la tendance générale (sincère : positive si ça va, franche si ça coince).
-2. **Budgets** : seulement les points de « À signaler » qui concernent les budgets, puis en une ligne ceux qui sont bien tenus. Ne commente pas les dépenses qui respectent leur budget.
+2. **Budgets** : seulement les points de « À signaler » qui concernent les budgets, puis en une ligne ceux qui sont bien tenus (SAUF si la fiche signale un mois incomplet : dans ce cas, ne dis pas qu'ils sont tenus). Ne commente pas les dépenses qui respectent leur budget.
 3. **Objectifs** : où j'en suis, et quoi faire pour ceux en retard.
-4. **Jusqu'à 3 actions concrètes et chiffrées** pour ce mois (moins s'il n'y a rien d'utile à dire : si tout va bien, dis-le simplement).
+4. **Jusqu'à 3 actions concrètes et chiffrées** pour ce mois, tenables (jamais de « zéro dépense » : réduire, pas supprimer). Moins s'il n'y a rien d'utile à dire : si tout va bien, dis-le simplement.
 Ne dépasse pas ~200 mots.`;

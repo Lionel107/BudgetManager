@@ -24,8 +24,8 @@ L'aider à gérer son budget de façon optimale : tenir ses budgets, atteindre s
 2. Une dépense qui rentre dans son budget est validée : ne la critique pas, ne propose pas de la réduire.
 3. Ne critique jamais l'essentiel (logement, courses, santé, énergie, transport, assurances, impôts, enfants) ni ce qui est dans « À ne jamais couper ».
 4. Pour économiser, vise seulement les gros leviers non essentiels, avec un montant précis. Quelques euros ne valent pas une remarque.
-5. Les chiffres de la fiche sont exacts : cite-les, n'en invente pas, ne fais pas de calcul compliqué. S'il manque une info, demande-la.
-6. « Je peux me permettre X ? » → réponds d'abord oui / non / oui mais, puis pourquoi en 1-2 phrases (reste du budget concerné, marge du mois).
+5. Les chiffres de la fiche sont exacts : cite-les, n'en invente pas, ne fais pas de calcul compliqué. S'il manque une info, demande-la. Une dépense dont l'utilisateur parle et qui figure déjà dans ses opérations est DÉJÀ comptée dans les chiffres : ne l'ajoute pas une deuxième fois.
+6. « Je peux me permettre X ? » → réponds d'abord oui / non / oui mais, puis pourquoi en 1-2 phrases. Appuie-toi sur le reste du budget concerné et sur le « Disponible réel pour un extra » (pas sur la marge brute, qui ne compte pas les courses et autres budgets encore à dépenser).
 7. S'il exprime du stress, de la fatigue ou un coup dur : une phrase sincère d'abord, puis l'aide concrète. Jamais de morale ni de culpabilisation.
 8. Félicite brièvement ce qui va bien.
 9. Réponses courtes : 2 à 5 phrases, sauf si on te demande plus. Une seule question à la fois.
@@ -131,7 +131,7 @@ export async function loadFullContext(supabase: any): Promise<any> {
     const mk = monthKey(t.date);
     const d = new Date(t.date);
     if (t.transaction_type === "INCOME") {
-      income12 += amt;
+      if (mk !== curKey) income12 += amt;
       netByMonth[mk] = (netByMonth[mk] ?? 0) + amt;
       if (mk === curKey) curIncome += amt;
       continue;
@@ -145,14 +145,16 @@ export async function loadFullContext(supabase: any): Promise<any> {
     if (d >= weekStart) weekPerCat[cat] = (weekPerCat[cat] ?? 0) + amt;
   }
 
-  // Nombre de mois réellement couverts par l'historique (1 à 12) : évite de diviser
-  // par 12 quand l'utilisateur n'a que quelques mois de données.
+  // Moyennes sur les mois COMPLETS réellement couverts par l'historique (hors mois
+  // en cours) : ni divisées par 12 à tort, ni diluées par un mois à peine commencé.
   const oldest = tx.length ? new Date(tx[tx.length - 1].date) : now;
-  const monthsCovered = Math.min(12, Math.max(1,
-    (y - oldest.getUTCFullYear()) * 12 + (m - oldest.getUTCMonth()) + 1));
+  const completeMonths = Math.min(12, (y - oldest.getUTCFullYear()) * 12 + (m - oldest.getUTCMonth()));
+  const monthsCovered = Math.max(1, completeMonths);
 
   const spendingHistory = Object.entries(perCatMonth).map(([name, byMonth]) => {
-    const total = Object.values(byMonth).reduce((a, b) => a + b, 0);
+    const total = Object.entries(byMonth)
+      .filter(([k]) => completeMonths < 1 || k !== curKey)
+      .reduce((a, [, v]) => a + v, 0);
     const avg = total / monthsCovered;
     const cur = curPerCat[name] ?? 0;
     return {
@@ -165,35 +167,10 @@ export async function loadFullContext(supabase: any): Promise<any> {
     };
   }).sort((a, b) => b.monthlyAverage - a.monthlyAverage);
 
-  // ---- Budgets : consommé sur la période + rythme ----
-  const budgetList = ((budgets ?? []) as any[]).map((b) => {
-    const name = b.category?.name ?? "?";
-    const essential = b.category?.is_essential !== false;
-    const limit = Number(b.budget_limit) || 0;
-    let spent: number, progress: number | null;
-    switch (b.period_type) {
-      case "YEARLY": spent = ytdPerCat[name] ?? 0; progress = dayOfYear / daysInYear; break;
-      case "WEEKLY": spent = weekPerCat[name] ?? 0; progress = null; break;
-      default: spent = curPerCat[name] ?? 0; progress = dayOfMonth / daysInMonth;
-    }
-    let status = "OK";
-    if (spent > limit + 0.5) status = "DÉPASSÉ";
-    else if (!essential && spent >= limit * 0.9) status = "PROCHE_LIMITE";
-    else if (!essential && progress != null && progress >= 0.2 && spent > limit * progress * 1.25) status = "RYTHME_RAPIDE";
-    return {
-      category: name,
-      period: b.period_type,
-      essential,
-      limit: round2(limit),
-      spent: round2(spent),
-      remaining: round2(limit - spent),
-      pct: limit > 0 ? Math.round((spent / limit) * 100) : null,
-      status,
-    };
-  });
-
   // ---- Charges fixes (récurrences) + ce qui reste à tomber ce mois-ci ----
   let dueRestOfMonth = 0, incomeRestOfMonth = 0;
+  const dueByCat: Record<string, number> = {};          // charges fixes encore à prélever ce mois, par catégorie
+  const fixedMonthlyByCat: Record<string, number> = {}; // poids mensuel des charges fixes, par catégorie
   const recurringList = ((recurring ?? []) as any[]).map((r) => {
     const amt = Number(r.amount) || 0;
     let occ = 0;
@@ -203,7 +180,14 @@ export async function loadFullContext(supabase: any): Promise<any> {
       if (d >= new Date(isoDay(now) + "T00:00:00Z")) occ++;
       d = addPeriod(d, r.frequency_type, r.repeat_interval);
     }
-    if (r.transaction_type === "EXPENSE") dueRestOfMonth += occ * amt;
+    const rcat = r.category?.name ?? null;
+    if (r.transaction_type === "EXPENSE") {
+      dueRestOfMonth += occ * amt;
+      if (rcat) {
+        dueByCat[rcat] = (dueByCat[rcat] ?? 0) + occ * amt;
+        fixedMonthlyByCat[rcat] = (fixedMonthlyByCat[rcat] ?? 0) + monthlyEquivalent(amt, r.frequency_type, r.repeat_interval);
+      }
+    }
     if (r.transaction_type === "INCOME") incomeRestOfMonth += occ * amt;
     return {
       title: r.title,
@@ -219,6 +203,35 @@ export async function loadFullContext(supabase: any): Promise<any> {
     .filter((r) => r.type === "EXPENSE")
     .reduce((s, r) => s + r.monthlyEquivalent, 0));
 
+  // ---- Budgets : consommé sur la période + rythme ----
+  const budgetList = ((budgets ?? []) as any[]).map((b) => {
+    const name = b.category?.name ?? "?";
+    const essential = b.category?.is_essential !== false;
+    const limit = Number(b.budget_limit) || 0;
+    let spent: number, progress: number | null;
+    switch (b.period_type) {
+      case "YEARLY": spent = ytdPerCat[name] ?? 0; progress = dayOfYear / daysInYear; break;
+      case "WEEKLY": spent = weekPerCat[name] ?? 0; progress = null; break;
+      default: spent = curPerCat[name] ?? 0; progress = dayOfMonth / daysInMonth;
+    }
+    // Budget essentiellement occupé par une charge fixe (abonnement…) : le voir plein est normal.
+    const mostlyFixed = (fixedMonthlyByCat[name] ?? 0) >= limit * 0.8;
+    let status = "OK";
+    if (spent > limit + 0.5) status = "DÉPASSÉ";
+    else if (!essential && !mostlyFixed && spent >= limit * 0.9) status = "PROCHE_LIMITE";
+    else if (!essential && !mostlyFixed && progress != null && progress >= 0.2 && spent > limit * progress * 1.25) status = "RYTHME_RAPIDE";
+    return {
+      category: name,
+      period: b.period_type,
+      essential,
+      limit: round2(limit),
+      spent: round2(spent),
+      remaining: round2(limit - spent),
+      pct: limit > 0 ? Math.round((spent / limit) * 100) : null,
+      status,
+    };
+  });
+
   // ---- Profil ----
   const statedIncome = Number(prof?.monthly_income) || 0;
   const profile = prof ? {
@@ -233,16 +246,36 @@ export async function loadFullContext(supabase: any): Promise<any> {
   // Marge du mois = revenus du mois (réels, ou déclarés s'ils ne sont pas encore
   // tombés) − dépenses déjà faites − charges fixes encore à prélever d'ici la fin du mois.
   const expectedIncome = Math.max(curIncome + incomeRestOfMonth, statedIncome);
-  const margin = round2(expectedIncome - curExpenses - dueRestOfMonth);
+  // Une régularisation négative CE mois-ci = de l'argent réellement parti sans être saisi :
+  // pas une dépense de budget, mais il manque bien sur le compte → on le retire de la marge.
+  const unrecordedThisMonth = round2(((regs ?? []) as any[])
+    .filter((r) => String(r.regularized_at).slice(0, 7) === curKey && Number(r.difference) < 0)
+    .reduce((s2, r) => s2 - Number(r.difference), 0));
+  const margin = round2(expectedIncome - curExpenses - dueRestOfMonth - unrecordedThisMonth);
+  // Disponible réel pour un extra = marge − ce qui reste à dépenser dans les budgets mensuels
+  // (hors charges fixes déjà comptées dans la marge).
+  const stillBudgeted = budgetList
+    .filter((b) => b.period === "MONTHLY" && b.remaining > 0)
+    .reduce((s2, b) => s2 + Math.max(0, b.remaining - (dueByCat[b.category] ?? 0)), 0);
+  const availableToSpend = round2(margin - stillBudgeted);
+  // Capacité d'épargne prévue = revenu − budgets (équivalent mensuel). Sert à vérifier
+  // que les objectifs sont atteignables, plutôt que d'exiger l'impossible.
+  const monthlyBudgets = budgetList.reduce((s2, b) =>
+    s2 + (b.period === "YEARLY" ? b.limit / 12 : b.period === "WEEKLY" ? b.limit * 52 / 12 : b.limit), 0);
+  const refIncome = statedIncome || round2(income12 / monthsCovered);
+  const savingsCapacity = budgetList.length && refIncome ? round2(refIncome - monthlyBudgets) : null;
 
   // ---- Objectifs (même logique que AnalysisRepository.objectiveProgress) ----
-  // Rythme d'épargne = moyenne (revenus − dépenses) sur le mois en cours + les 2 précédents.
+  // Rythme d'épargne = moyenne (revenus − dépenses) des 3 derniers mois COMPLETS
+  // (le mois en cours, incomplet, fausserait la moyenne).
+  const paceMonths = Math.max(1, Math.min(3, completeMonths));
   let net3 = 0;
-  for (let i = 0; i < 3; i++) {
+  for (let i = 1; i <= paceMonths; i++) {
     const dt = new Date(Date.UTC(y, m - i, 1));
     net3 += netByMonth[isoDay(dt).slice(0, 7)] ?? 0;
   }
-  const savingsPace = round2(net3 / 3);
+  if (completeMonths < 1) net3 = netByMonth[curKey] ?? 0;
+  const savingsPace = round2(net3 / paceMonths);
   const objectiveList = ((objectives ?? []) as any[]).map((o) => {
     const target = Number(o.target_amount) || 0;
     let monthsLeft = 12;
@@ -282,12 +315,17 @@ export async function loadFullContext(supabase: any): Promise<any> {
     profile,
     accounts: ((accounts ?? []) as any[]).map((a) => ({ name: a.name, type: a.account_type, balance: round2(Number(a.balance) || 0) })),
     savingsPace,
+    savingsCapacity,
     currentMonth: {
       income: round2(curIncome),
       expenses: round2(curExpenses),
       fixedChargesStillDue: round2(dueRestOfMonth),
       incomeStillExpected: round2(incomeRestOfMonth),
+      unrecordedSpending: unrecordedThisMonth,
+      // Mois recalé par une régularisation : les dépenses saisies sont incomplètes.
+      incomplete: unrecordedThisMonth > 0,
       margin,
+      availableToSpend,
     },
     history: {
       monthsCovered,
@@ -328,6 +366,10 @@ function alertsOf(c: any): string[] {
     else if (b.status === "RYTHME_RAPIDE") out.push(`Budget ${b.category} part vite : ${b.pct} % utilisé au jour ${c.dayOfMonth} sur ${c.daysInMonth}.`);
   }
   if (c.currentMonth.margin < 0) out.push(`Mois dans le rouge : marge de ${eur(c.currentMonth.margin)} une fois les charges fixes à venir payées.`);
+  const needed = c.objectives.filter((o: any) => o.type === "SAVINGS").reduce((s: number, o: any) => s + o.monthlyNeeded, 0);
+  if (c.savingsCapacity != null && needed > c.savingsCapacity + 5) {
+    out.push(`Objectifs trop ambitieux pour le budget actuel : ils demandent ${eur(needed)}/mois, le budget en laisse au mieux ${eur(c.savingsCapacity)}. Ne demande pas l'impossible : propose de décaler une date ou de réduire un montant, chiffres à l'appui.`);
+  }
   for (const o of c.objectives) {
     if (o.onTrack) continue;
     if (o.type === "SAVINGS") out.push(`Objectif « ${o.title} » en retard : il faut épargner ${eur(o.monthlyNeeded)}/mois, rythme actuel ${eur(o.currentPace)}/mois.`);
@@ -353,7 +395,8 @@ export function buildBriefing(c: any, withRecent = false): string {
   if (alerts.length) alerts.forEach((a) => L.push(`- ${a}`));
   else L.push("- Rien à signaler : tout est dans les clous.");
 
-  const good = c.budgets.filter((b: any) => b.status === "OK" && !b.essential).map((b: any) => b.category);
+  // Mois incomplet : un budget « tenu » l'est peut-être seulement faute de saisie.
+  const good = c.currentMonth.incomplete ? [] : c.budgets.filter((b: any) => b.status === "OK" && !b.essential).map((b: any) => b.category);
   const goodObj = c.objectives.filter((o: any) => o.onTrack).map((o: any) => o.title);
   if (good.length || goodObj.length) {
     L.push("", "## Ce qui va bien");
@@ -374,11 +417,15 @@ export function buildBriefing(c: any, withRecent = false): string {
 
   const cm = c.currentMonth;
   L.push("", "## Ce mois-ci");
+  if (cm.incomplete) L.push(`- ⚠️ Mois incomplet : une régularisation a révélé ${eur(cm.unrecordedSpending)} de dépenses non saisies. Les budgets du mois paraissent mieux tenus qu'en réalité : ne les félicite pas.`);
   L.push(`- Revenus reçus : ${eur(cm.income)}${cm.incomeStillExpected > 0 ? ` (+${eur(cm.incomeStillExpected)} attendus)` : ""}`);
   L.push(`- Dépenses faites : ${eur(cm.expenses)}`);
   L.push(`- Charges fixes encore à prélever : ${eur(cm.fixedChargesStillDue)}`);
-  L.push(`- Marge du mois (ce qui reste vraiment) : ${eur(cm.margin)}`);
+  if (cm.unrecordedSpending > 0) L.push(`- Dépenses non saisies (régularisation) : ${eur(cm.unrecordedSpending)}`);
+  L.push(`- Marge du mois (revenus − dépenses − charges fixes à venir) : ${eur(cm.margin)}`);
+  L.push(`- Disponible réel pour un extra (une fois réservé ce qui reste dans les budgets du mois) : ${eur(cm.availableToSpend)}`);
   L.push(`- Épargne moyenne des 3 derniers mois : ${eur(c.savingsPace)}/mois`);
+  if (c.savingsCapacity != null) L.push(`- Épargne permise par le budget (revenu − budgets) : ${eur(c.savingsCapacity)}/mois`);
 
   if (c.budgets.length) {
     L.push("", "## Budgets");

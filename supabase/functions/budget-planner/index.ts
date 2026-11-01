@@ -175,36 +175,57 @@ Deno.serve(async (req: Request) => {
       if (b.category?.name) currentBudgetOf[b.category.name] = Number(b.budget_limit) || 0;
     }
 
-    // Agrégation dépenses par catégorie/mois + revenu
+    // Agrégation dépenses par catégorie/mois + revenu, sur les mois COMPLETS uniquement
+    // (le mois en cours, à peine commencé, ferait baisser toutes les moyennes).
+    const curKey = monthKeys[monthKeys.length - 1];
     let income = 0;
+    let oldestKey = curKey;
     const perCat: Record<string, Record<string, number>> = {};
     for (const t of txns) {
       const amt = Number(t.amount) || 0;
+      const mk = String(t.date).slice(0, 7);
+      if (mk < oldestKey) oldestKey = mk;
+      if (mk === curKey) continue;
       if (t.transaction_type === "INCOME") { income += amt; continue; }
       if (t.transaction_type !== "EXPENSE") continue;
       const cat = t.category?.name ?? "Sans catégorie";
-      const mk = String(t.date).slice(0, 7);
       perCat[cat] ??= {};
       perCat[cat][mk] = (perCat[cat][mk] ?? 0) + amt;
     }
+    // Mois complets réellement couverts : on ne divise PAS par 12 avec 6 mois d'historique.
+    const pastKeys = monthKeys.filter((k) => k >= oldestKey && k !== curKey);
+    const monthsCovered = Math.max(1, pastKeys.length);
+
+    // Charges fixes mensuelles par catégorie (abonnements, loyer…) : plancher incompressible.
+    const fixedByCat: Record<string, number> = {};
+    for (const r of (fullContext?.fixedCharges?.items ?? []) as any[]) {
+      if (r.type === "EXPENSE" && r.category) fixedByCat[r.category] = (fixedByCat[r.category] ?? 0) + Number(r.monthlyEquivalent || 0);
+    }
 
     // Revenu mensuel : la valeur DÉCLARÉE dans le profil prime (plus fiable que
-    // la moyenne des transactions, surtout au début) ; sinon moyenne sur 12 mois.
-    const monthlyIncome = statedIncome > 0 ? round2(statedIncome) : round2(income / 12);
+    // la moyenne des transactions, surtout au début) ; sinon moyenne des mois couverts.
+    const monthlyIncome = statedIncome > 0 ? round2(statedIncome) : round2(income / monthsCovered);
     const catContext = Object.entries(perCat).map(([name, byMonth]) => {
-      const values = monthKeys.map((k) => byMonth[k] ?? 0);
+      const values = pastKeys.map((k) => byMonth[k] ?? 0);
       const total = values.reduce((a, b) => a + b, 0);
+      const avg = total / monthsCovered;
       const med = median(values);
       const spikes = values.filter((v) => (v - med) >= 200 && v >= med * 1.4).length;
       const seasonal = total >= 150 && spikes >= 1 && spikes <= 4;
+      const essential = essentialOf[name] !== false;
+      // Minimum réaliste : jamais sous la charge fixe ; l'essentiel pas sous 90 % du réel,
+      // le superflu pas sous 50 % (au-delà, le budget devient intenable).
+      const floor = round2(Math.max(fixedByCat[name] ?? 0, avg * (essential && !seasonal ? 0.9 : 0.5)));
       return {
         category: name,
-        monthlyAverage: round2(total / 12),
-        essential: essentialOf[name] !== false,
+        monthlyAverage: round2(avg),
+        floor,
+        essential,
         seasonal,
         currentBudget: currentBudgetOf[name] ?? null,
       };
     }).sort((a, b) => b.monthlyAverage - a.monthlyAverage);
+    const floorOf: Record<string, number> = Object.fromEntries(catContext.map((c) => [c.category, c.floor]));
 
     const objectives = ((objRes.data ?? []) as any[]).map((o) => ({
       title: o.title,
@@ -213,6 +234,10 @@ Deno.serve(async (req: Request) => {
       targetDate: o.target_date,
       category: o.category?.name ?? null,
     }));
+    // Épargne mensuelle nécessaire pour tous les objectifs d'épargne (calcul déterministe).
+    const savingsNeeded = round2(objectives
+      .filter((o) => o.type === "SAVINGS")
+      .reduce((s, o) => s + o.targetAmount / monthsUntil(o.targetDate), 0));
 
     // ---- Construction du plan ----
     type PlanItem = { category: string; monthlyAmount: number; rationale: string; essential: boolean };
@@ -245,14 +270,32 @@ Deno.serve(async (req: Request) => {
     // Affinage IA (remarques/chat, optimisation objectifs) si clé dispo et Gemini répond.
     if (geminiKey) {
       try {
-        const g = await askGeminiPlan(geminiKey, { monthlyIncome, profile, categories: catContext, existingCategories, objectives, remarks: effectiveRemarks, history, currentPlan, briefing: buildBriefing(fullContext) });
+        const g = await askGeminiPlan(geminiKey, { monthlyIncome, savingsNeededForObjectives: savingsNeeded, profile, categories: catContext, existingCategories, objectives, remarks: effectiveRemarks, history, currentPlan, briefing: buildBriefing(fullContext) });
         reply = g.reply;
         newObjectives = g.newObjectives;
         // Garde-fou : l'épargne n'est pas une dépense -> on retire toute ligne "épargne".
         const cleaned = g.plan.filter((p) => !/(épargn|epargn|saving|économ|econom)/i.test(p.category));
         if (cleaned.length > 0) {
-          summary = g.summary;
           plan = cleaned.map((p) => ({ ...p, essential: essentialOf[p.category] !== false }));
+          // Garde-fou : aucun poste sous son minimum réaliste (charge fixe / dépense réelle).
+          const raised: string[] = [];
+          for (const p of plan) {
+            const f = floorOf[p.category];
+            if (f != null && p.monthlyAmount < f) {
+              p.monthlyAmount = Math.ceil(f);
+              p.rationale = `Remonté au minimum réaliste (${Math.ceil(f)} € : ta dépense réelle)`;
+              raised.push(p.category);
+            }
+          }
+          // Garde-fou : une catégorie essentielle régulière oubliée par l'IA est réintégrée.
+          for (const c of catContext) {
+            if (c.essential && !c.seasonal && c.monthlyAverage >= 10 && !plan.some((p) => p.category === c.category)) {
+              plan.push({ category: c.category, monthlyAmount: Math.ceil(c.floor), rationale: "Ajouté : dépense essentielle régulière", essential: true });
+              raised.push(c.category);
+            }
+          }
+          if (raised.length) reply += ` (J'ai remonté ${raised.join(", ")} à un montant réaliste : en dessous, tu ne tiendrais pas.)`;
+          summary = "";
         } else {
           summary = (hasCurrent ? "Tes montants sont conservés. " : summary + " ") + "IA : réponse vide.";
         }
@@ -268,7 +311,27 @@ Deno.serve(async (req: Request) => {
       summary += " [DEBUG] Aucune clé Gemini reçue par la fonction — vérifie Réglages → Clé API.";
     }
 
-    return json({ monthlyIncome, summary, plan, reply, newObjectives });
+    // Totaux toujours calculés ici : le modèle se trompe dans les additions.
+    const totalPlanned = round2(plan.reduce((s, p) => s + (Number(p.monthlyAmount) || 0), 0));
+    const savingsFreed = round2(monthlyIncome - totalPlanned);
+    // Les objectifs que l'assistant vient de proposer comptent aussi dans l'effort demandé.
+    const savingsNeededAll = round2(savingsNeeded + newObjectives
+      .filter((o: any) => o.type === "SAVINGS")
+      .reduce((s: number, o: any) => s + (Number(o.targetAmount) || 0) / monthsUntil(o.targetDate), 0));
+    if (!summary) {
+      summary = `Dépenses prévues : ${Math.round(totalPlanned)} €/mois · épargne dégagée : ${Math.round(savingsFreed)} €/mois` +
+        (savingsNeededAll > 0
+          ? (savingsFreed >= savingsNeededAll
+            ? ` (tes objectifs demandent ~${Math.round(savingsNeededAll)} €/mois : couverts ✅).`
+            : ` (tes objectifs demandent ~${Math.round(savingsNeededAll)} €/mois : il manque ${Math.round(savingsNeededAll - savingsFreed)} €/mois).`)
+          : ".");
+    }
+    // La réponse rédigée ne doit jamais contredire le calcul : on l'avertit si l'effort ne suffit pas.
+    if (reply && savingsNeededAll > 0 && savingsFreed < savingsNeededAll) {
+      reply += ` ⚠️ Pour être transparent : avec ce plan, il manque encore ${Math.round(savingsNeededAll - savingsFreed)} €/mois pour tenir tous tes objectifs. On peut décaler une date ou réduire un montant.`;
+    }
+
+    return json({ monthlyIncome, summary, plan, reply, newObjectives, totalPlanned, savingsFreed, savingsNeeded: savingsNeededAll });
   } catch (e) {
     console.error(e);
     return json({ error: String(e) }, 500);
@@ -294,7 +357,7 @@ async function askGeminiPlan(
   const prompt = `Dans cette conversation, tu construis et affines avec l'utilisateur son budget MENSUEL par catégorie.
 ${ctx.briefing}
 
-Données pour construire le plan (chiffres déjà calculés sur 12 mois) :
+Données pour construire le plan (moyennes déjà calculées sur les mois complets disponibles) :
 ${JSON.stringify({ ...ctx, briefing: undefined, history: undefined })}
 ${convo ? `\nConversation jusqu'ici :\n${convo}\n` : ""}
 
@@ -309,12 +372,17 @@ Règles :
 - Priorise les catégories "essential:true" ; comprime plutôt les "essential:false" si besoin d'épargner.
 - Les catégories "seasonal:true" ne tombent que certains mois : budgète-les à leur moyenne mensuelle (provision) pour lisser sur l'année, sans t'alarmer d'un mois isolé.
 - Intègre les "objectives" : pour un objectif SAVINGS (épargner targetAmount d'ici targetDate), dégage la marge mensuelle nécessaire (revenu - dépenses). Pour SPENDING_LIMIT, respecte le plafond sur la catégorie visée.
-- La somme des budgets doit laisser une épargne cohérente vs monthlyIncome.
+- La somme des budgets doit laisser une épargne cohérente vs monthlyIncome. "savingsNeededForObjectives" = l'épargne mensuelle que demandent ses objectifs (déjà calculée).
+- PLANCHER : chaque catégorie a un "floor" (minimum réaliste = charge fixe ou dépense réelle). Ne descends JAMAIS une catégorie sous son floor : un budget intenable est pire qu'un objectif repoussé. Si les objectifs restent hors de portée, dis-le franchement et propose de décaler une date ou de réduire un montant.
+- Si l'épargne demandée est DÉJÀ atteinte avec le plan actuel, ne coupe rien de plus.
+- Ne fais AUCUNE addition : n'écris aucun total ni montant d'épargne global dans "reply" (l'app les calcule et les affiche).
+- Un objectif d'épargne est financé par l'épargne dégagée (revenu − budgets), JAMAIS par une catégorie de dépense : ne gonfle pas "Voyages" (ou autre) pour un projet comme un voyage à venir.
+- Un rythme (« 400 € par mois ») n'est PAS un objectif : ne le mets jamais dans "newObjectives". Un objectif = un montant total à atteindre pour une date.
 - Si "remarks" (le dernier message de l'utilisateur) est fourni, AJUSTE le "currentPlan" en conséquence (garde les montants qu'il a édités sauf s'il demande de les changer). Tiens compte de la "Conversation jusqu'ici".
 - Dans "reply", réponds DIRECTEMENT et brièvement à l'utilisateur, comme dans une conversation, avec ta personnalité : dis ce que tu as changé et pourquoi, ou pose UNE question si tu as besoin d'une précision. Pas de listes à puces dans "reply".
-- "newObjectives" : SEULEMENT si la conversation (ou le profil) révèle un BUT chiffré et concret que l'utilisateur n'a PAS encore formalisé (ex. « je veux épargner 3000 € pour décembre », « ne pas dépasser 200 € de resto »). Ne propose JAMAIS un objectif déjà présent dans "objectives". Dans le doute, laisse [] (tableau vide). type = "SAVINGS" (épargner un montant pour une date) ou "SPENDING_LIMIT" (plafond sur une catégorie). targetDate au format AAAA-MM-JJ ou null. category = nom de catégorie pour un plafond, sinon null.
+- "newObjectives" : SEULEMENT si la conversation (ou le profil) révèle un BUT chiffré et concret que l'utilisateur n'a PAS encore formalisé (ex. « je veux épargner 3000 € pour décembre », « ne pas dépasser 200 € de resto »). Ne propose JAMAIS un objectif déjà présent dans "objectives". Le montant doit venir d'un chiffre donné par l'utilisateur : n'invente JAMAIS un montant (si le projet n'est pas chiffré, demande-lui combien dans "reply" et laisse []). Dans le doute, laisse [] (tableau vide). type = "SAVINGS" (épargner un montant pour une date) ou "SPENDING_LIMIT" (plafond sur une catégorie). targetDate au format AAAA-MM-JJ ou null. category = nom de catégorie pour un plafond, sinon null.
 Réponds UNIQUEMENT en JSON valide :
-{"reply": "ta réponse conversationnelle à l'utilisateur (2-4 phrases)", "summary": "1 phrase de synthèse du plan et de l'épargne dégagée", "plan": [{"category": "<nom de catégorie, existante ou nouvelle>", "monthlyAmount": <nombre>, "rationale": "courte justification"}], "newObjectives": [{"title": "<titre court>", "type": "SAVINGS|SPENDING_LIMIT", "targetAmount": <nombre>, "targetDate": "AAAA-MM-JJ ou null", "category": "<nom ou null>"}]}`;
+{"reply": "ta réponse conversationnelle à l'utilisateur (2-4 phrases)", "plan": [{"category": "<nom de catégorie, existante ou nouvelle>", "monthlyAmount": <nombre>, "rationale": "courte justification"}], "newObjectives": [{"title": "<titre court>", "type": "SAVINGS|SPENDING_LIMIT", "targetAmount": <nombre>, "targetDate": "AAAA-MM-JJ ou null", "category": "<nom ou null>"}]}`;
 
   const text = await askGemini(key, PERSONA, [{ role: "user", text: prompt }], { temperature: 0.6, json: true });
   const parsed = JSON.parse(text);
