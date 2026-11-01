@@ -11,7 +11,7 @@
 // ============================================================================
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { askGemini, loadFullContext, PERSONA } from "../_shared/coach.ts";
+import { askGemini, buildBriefing, loadFullContext, PERSONA } from "../_shared/coach.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -245,7 +245,7 @@ Deno.serve(async (req: Request) => {
     // Affinage IA (remarques/chat, optimisation objectifs) si clé dispo et Gemini répond.
     if (geminiKey) {
       try {
-        const g = await askGeminiPlan(geminiKey, { monthlyIncome, profile, categories: catContext, existingCategories, objectives, remarks: effectiveRemarks, history, currentPlan, fullContext });
+        const g = await askGeminiPlan(geminiKey, { monthlyIncome, profile, categories: catContext, existingCategories, objectives, remarks: effectiveRemarks, history, currentPlan, briefing: buildBriefing(fullContext) });
         reply = g.reply;
         newObjectives = g.newObjectives;
         // Garde-fou : l'épargne n'est pas une dépense -> on retire toute ligne "épargne".
@@ -292,8 +292,10 @@ async function askGeminiPlan(
     .map((t: any) => `${t?.role === "assistant" ? "Assistant" : "Utilisateur"}: ${t?.text ?? ""}`)
     .join("\n");
   const prompt = `Dans cette conversation, tu construis et affines avec l'utilisateur son budget MENSUEL par catégorie.
-Contexte (chiffres déjà calculés sur 12 mois ; "fullContext" = l'intégralité de son profil et de son budget : comptes, charges fixes, marge du mois, budgets en cours, dernières opérations) :
-${JSON.stringify(ctx)}
+${ctx.briefing}
+
+Données pour construire le plan (chiffres déjà calculés sur 12 mois) :
+${JSON.stringify({ ...ctx, briefing: undefined, history: undefined })}
 ${convo ? `\nConversation jusqu'ici :\n${convo}\n` : ""}
 
 Règles :

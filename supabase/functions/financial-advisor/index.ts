@@ -12,7 +12,7 @@
 // ============================================================================
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { askGemini as askCoach, loadFullContext, PERSONA } from "../_shared/coach.ts";
+import { askGemini as askCoach, buildBriefing, loadFullContext, PERSONA } from "../_shared/coach.ts";
 
 const MOIS_FR = ["", "janvier", "février", "mars", "avril", "mai", "juin",
   "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
@@ -132,7 +132,7 @@ Deno.serve(async (req: Request) => {
     let advice: { summary: string; tips: string[] } | null = null;
     if (geminiKey) {
       try {
-        advice = await askGemini(geminiKey, analysis, await loadFullContext(supabase));
+        advice = await askGemini(geminiKey, analysis, buildBriefing(await loadFullContext(supabase)));
       } catch (e) {
         console.error("Gemini:", e);
       }
@@ -169,13 +169,13 @@ function median(arr: number[]): number {
 async function askGemini(
   key: string,
   analysis: unknown,
-  fullContext: unknown,
+  briefing: string,
 ): Promise<{ summary: string; tips: string[] }> {
   const prompt = `Voici l'analyse déterministe de mes 12 derniers mois (montants déjà calculés, ne les recalcule pas) :
 ${JSON.stringify(analysis)}
 
 Et l'intégralité de mon profil et de mon budget actuel :
-${JSON.stringify(fullContext)}
+${briefing}
 
 Rédige un accompagnement PERSONNALISÉ en français. Insiste sur la SAISONNALITÉ : les catégories marquées "seasonal" ont des dépenses concentrées sur certains mois (champ peakMonths, ex. assurance en mars, vacances l'été, cadeaux en décembre). Recommande de mettre de côté chaque mois le montant "seasonalProvision" (€/mois) pour absorber ces pics sans être surpris. Utilise "monthlyAverage" pour parler du coût lissé d'une catégorie.
 Les conseils doivent viser les vrais leviers (pas de remarque sur ce qui est essentiel ou déjà bien tenu).

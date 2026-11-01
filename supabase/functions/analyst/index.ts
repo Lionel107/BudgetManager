@@ -6,10 +6,10 @@
 //   • mode "chat"  : répond librement à l'utilisateur (conversation multi-tours).
 //
 // CONTEXTE COMPLET À CHAQUE APPEL : la fonction recharge elle-même, depuis la base
-// (RLS via le JWT de l'utilisateur), l'intégralité de son profil et de son budget
-// (voir _shared/coach.ts → loadFullContext). Le `context` envoyé par le client
-// (calculs de l'app : états des budgets, progression des objectifs) est ajouté en
-// complément sous "appCalculations".
+// (RLS via le JWT de l'utilisateur), l'intégralité de son profil et de son budget,
+// puis le résume en une FICHE courte en français, problèmes en tête
+// (voir _shared/coach.ts → loadFullContext + buildBriefing). Le `context` envoyé par
+// l'app desktop n'est plus nécessaire (la PWA mobile n'en envoie pas).
 //
 // PRINCIPE : l'IA ne calcule PAS. Tous les montants sont déterministes.
 //
@@ -20,7 +20,7 @@
 // ============================================================================
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { askGemini, ChatTurn, loadFullContext, PERSONA } from "../_shared/coach.ts";
+import { askGemini, buildBriefing, ChatTurn, loadFullContext, mentionsTransactions, PERSONA, REMINDER } from "../_shared/coach.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -50,7 +50,6 @@ Deno.serve(async (req: Request) => {
 
     const geminiKey: string | undefined = body?.geminiKey;
     const mode: string = body?.mode === "chat" ? "chat" : "bilan";
-    const clientContext = body?.context ?? null;
     const history: ChatTurn[] = Array.isArray(body?.history) ? body.history : [];
     const question: string = String(body?.question ?? "").trim();
 
@@ -64,10 +63,9 @@ Deno.serve(async (req: Request) => {
       { global: { headers: { Authorization: authHeader } } },
     );
     const full = await loadFullContext(supabase);
-    const system = `${PERSONA}
-
-CONTEXTE COMPLET DE L'UTILISATEUR (rechargé à l'instant, chiffres déterministes) :
-${JSON.stringify({ ...full, appCalculations: clientContext })}`;
+    // Les dernières opérations ne sont ajoutées que si la question en parle (fiche plus légère).
+    const briefing = buildBriefing(full, mode === "bilan" || mentionsTransactions(question));
+    const system = `${PERSONA}\n\n${briefing}`;
 
     let turns: ChatTurn[];
     if (mode === "chat") {
@@ -75,7 +73,7 @@ ${JSON.stringify({ ...full, appCalculations: clientContext })}`;
       const past = history.slice(-MAX_HISTORY);
       const last = past[past.length - 1];
       if (last && last.role === "user" && last.text.trim() === question) past.pop();
-      turns = [...past, { role: "user", text: question || "Salut !" }];
+      turns = [...past, { role: "user", text: `${question || "Salut !"}\n\n${REMINDER}` }];
     } else {
       turns = [{ role: "user", text: BILAN_REQUEST }];
     }
@@ -90,7 +88,7 @@ ${JSON.stringify({ ...full, appCalculations: clientContext })}`;
 
 const BILAN_REQUEST = `Fais-moi le BILAN de mon mois en cours, en Markdown, structuré ainsi :
 1. Une phrase d'accroche sur la tendance générale (sincère : positive si ça va, franche si ça coince).
-2. **Budgets** : seulement ceux qui posent un vrai problème (dépassés, proches de la limite ou au rythme trop rapide, hors essentiels) et, en une ligne, ceux qui sont bien tenus. Ne commente pas les dépenses qui respectent leur budget.
+2. **Budgets** : seulement les points de « À signaler » qui concernent les budgets, puis en une ligne ceux qui sont bien tenus. Ne commente pas les dépenses qui respectent leur budget.
 3. **Objectifs** : où j'en suis, et quoi faire pour ceux en retard.
 4. **Jusqu'à 3 actions concrètes et chiffrées** pour ce mois (moins s'il n'y a rien d'utile à dire : si tout va bien, dis-le simplement).
 Ne dépasse pas ~200 mots.`;

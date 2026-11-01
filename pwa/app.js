@@ -242,6 +242,133 @@ $("save").addEventListener("click", async () => {
   }
 });
 
+// ===================== COPILOTE (chat IA) =====================
+// Appelle l'Edge Function `analyst` (mode chat), qui recharge elle-même tout le
+// profil + budget à chaque message. La clé Gemini reste sur CE téléphone
+// (localStorage) : envoyée à chaque appel, jamais stockée côté serveur.
+
+const KEY_STORE = "bm_gemini_key";
+const HISTORY_STORE = "bm_chat_history";
+const SUGGESTIONS = [
+  "Comment je m'en sors ce mois-ci ?",
+  "Je peux me faire un resto ce week-end ?",
+  "Où je peux vraiment économiser ?",
+];
+let chatHistory = [];   // [{ role: "user" | "assistant", text }]
+let chatSending = false;
+let askingKey = false;
+
+const store = {
+  get(k) { try { return localStorage.getItem(k) || ""; } catch { return ""; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch { /* stockage indisponible */ } },
+};
+try { chatHistory = JSON.parse(sessionStorage.getItem(HISTORY_STORE) || "[]"); } catch { chatHistory = []; }
+function saveHistory() {
+  try { sessionStorage.setItem(HISTORY_STORE, JSON.stringify(chatHistory.slice(-30))); } catch { /* ignore */ }
+}
+
+/** Markdown léger et sûr : échappement HTML puis **gras**, *italique*, listes, retours à la ligne. */
+function renderMd(text) {
+  const lines = escapeHtml(text).split("\n");
+  let html = "", inList = false;
+  for (const raw of lines) {
+    const line = raw.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/(^|\s)\*(\S.+?)\*/g, "$1<em>$2</em>");
+    const li = line.match(/^\s*(?:[-*•]|\d+\.)\s+(.*)$/);
+    if (li) { if (!inList) { html += "<ul>"; inList = true; } html += `<li>${li[1]}</li>`; continue; }
+    if (inList) { html += "</ul>"; inList = false; }
+    html += line.trim() ? `${line}<br>` : "<br>";
+  }
+  if (inList) html += "</ul>";
+  return html.replace(/(<br>)+$/, "");
+}
+
+function renderChat() {
+  const body = $("chat-body");
+  if (askingKey || !store.get(KEY_STORE)) {
+    askingKey = true;
+    body.innerHTML = `
+      <div class="bubble bot">Salut ! 👋 Je suis ton copilote budget. Pour discuter, j'ai besoin de ta clé Gemini (la même que dans l'app PC).</div>
+      <div class="keybox">
+        Crée-la gratuitement sur <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>, puis colle-la ici. Elle reste sur ce téléphone.
+        <input id="key-input" type="password" placeholder="AIza…" autocomplete="off" style="margin-top:10px" value="${escapeHtml(store.get(KEY_STORE))}" />
+        <button id="key-save" type="button">Enregistrer</button>
+      </div>`;
+    $("key-save").addEventListener("click", () => {
+      const k = $("key-input").value.trim();
+      if (!k) return;
+      store.set(KEY_STORE, k);
+      askingKey = false;
+      renderChat();
+    });
+    return;
+  }
+
+  let html = "";
+  if (chatHistory.length === 0) {
+    html += `<div class="bubble bot">Salut ! 👋 Pose-moi n'importe quelle question sur ton budget : je vois ton profil, tes budgets, tes objectifs et tes dépenses.</div>`;
+    html += `<div class="chips">${SUGGESTIONS.map((s) => `<button class="chip" type="button">${escapeHtml(s)}</button>`).join("")}</div>`;
+  }
+  for (const m of chatHistory) {
+    const cls = m.role === "user" ? "me" : `bot${m.error ? " err" : ""}`;
+    html += `<div class="bubble ${cls}">${m.role === "user" ? escapeHtml(m.text) : renderMd(m.text)}</div>`;
+  }
+  if (chatSending) html += `<div class="bubble bot"><span class="typing"><i></i><i></i><i></i></span></div>`;
+  body.innerHTML = html;
+  body.querySelectorAll(".chip").forEach((c) => c.addEventListener("click", () => sendChat(c.textContent)));
+  body.scrollTop = body.scrollHeight;
+}
+
+async function sendChat(text) {
+  const question = (text ?? $("chat-input").value).trim();
+  if (!question || chatSending) return;
+  if (!store.get(KEY_STORE)) { askingKey = true; renderChat(); return; }
+  askingKey = false;
+  $("chat-input").value = "";
+  // Historique envoyé = tours précédents (sans les messages d'erreur)
+  const history = chatHistory.filter((m) => !m.error).map(({ role, text }) => ({ role, text }));
+  chatHistory.push({ role: "user", text: question });
+  chatSending = true;
+  renderChat();
+  try {
+    const { data, error } = await supabase.functions.invoke("analyst", {
+      body: { geminiKey: store.get(KEY_STORE), mode: "chat", history, question },
+    });
+    if (error) {
+      let msg = error.message;
+      try { msg = (await error.context.json()).error || msg; } catch { /* corps non JSON */ }
+      throw new Error(msg);
+    }
+    if (data?.error) throw new Error(data.error);
+    chatHistory.push({ role: "assistant", text: data?.reply || "…" });
+  } catch (e) {
+    const m = String(e?.message || e);
+    const hint = /401|403|API key|clé/i.test(m) ? " Vérifie ta clé Gemini (icône 🔑 en haut)." : "";
+    chatHistory.push({ role: "assistant", text: `Oups, je n'ai pas pu répondre : ${m}${hint}`, error: true });
+  } finally {
+    chatSending = false;
+    saveHistory();
+    renderChat();
+  }
+}
+
+function openChat() {
+  $("chat").classList.add("open");
+  $("chat").setAttribute("aria-hidden", "false");
+  renderChat();
+  if (!askingKey) setTimeout(() => $("chat-input").focus(), 300);
+}
+function closeChat() {
+  $("chat").classList.remove("open");
+  $("chat").setAttribute("aria-hidden", "true");
+  $("chat-input").blur();
+}
+
+$("chat-fab").addEventListener("click", openChat);
+$("chat-close").addEventListener("click", closeChat);
+$("chat-key").addEventListener("click", () => { askingKey = true; renderChat(); });
+$("chat-send").addEventListener("click", () => sendChat());
+$("chat-input").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); sendChat(); } });
+
 // ===================== UTILITAIRES =====================
 
 function fmt(n) { return Number(n).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
@@ -254,10 +381,11 @@ function escapeHtml(s) {
 async function route(session) {
   hide($("loading"));
   if (session) {
-    hide($("auth")); show($("app"));
+    hide($("auth")); show($("app")); show($("chat-fab"));
     await loadAppData();
   } else {
-    hide($("app")); show($("auth"));
+    hide($("app")); show($("auth")); hide($("chat-fab")); closeChat();
+    chatHistory = []; saveHistory();
   }
 }
 

@@ -14,32 +14,34 @@
 
 // deno-lint-ignore-file no-explicit-any
 
-export const PERSONA = `Tu es le copilote budgétaire perso de l'utilisateur (particulier en France, euros).
+export const PERSONA = `Tu es le copilote budget de l'utilisateur : un pote calé en finances, détendu et chaleureux. Tu tutoies, tu parles simplement, avec un brin d'humour et 0 à 2 emojis.
 
-QUI TU ES
-- Le pote calé en finances : détendu, chaleureux, un brin d'humour quand ça s'y prête. Tu tutoies, tu parles naturellement, sans jargon ni ton de banquier. Emojis avec parcimonie (0 à 2 par message).
-- Compatissant : si l'utilisateur exprime du stress, de la fatigue, un coup dur ou de la culpabilité, accueille-le d'abord en une phrase sincère, PUIS aide-le concrètement. Jamais de jugement, jamais de morale, jamais de culpabilisation.
+# Ta mission (passe avant tout le reste)
+L'aider à gérer son budget de façon optimale : tenir ses budgets, atteindre ses objectifs, épargner. Gentil oui, complaisant jamais : un vrai problème se dit clairement, chiffre à l'appui, avec une solution.
 
-TA MISSION — PRIORITÉ ABSOLUE, RIEN NE PASSE AVANT
-- Aider l'utilisateur à gérer son budget de façon OPTIMALE : tenir ses budgets, atteindre ses objectifs, épargner, anticiper les grosses dépenses.
-- Ton côté cool ne doit JAMAIS adoucir une vérité utile. Si quelque chose cloche vraiment, tu le dis clairement, chiffres à l'appui, et tu proposes quoi faire. Gentil, oui ; complaisant, jamais.
-- Franc : pas de langue de bois. Quand on te demande ton avis, donne-le, tranché.
+# Tes règles
+1. La section « À signaler » de la fiche liste les SEULS problèmes réels. Si elle dit « Rien à signaler », tout va bien : ne cherche pas de défaut.
+2. Une dépense qui rentre dans son budget est validée : ne la critique pas, ne propose pas de la réduire.
+3. Ne critique jamais l'essentiel (logement, courses, santé, énergie, transport, assurances, impôts, enfants) ni ce qui est dans « À ne jamais couper ».
+4. Pour économiser, vise seulement les gros leviers non essentiels, avec un montant précis. Quelques euros ne valent pas une remarque.
+5. Les chiffres de la fiche sont exacts : cite-les, n'en invente pas, ne fais pas de calcul compliqué. S'il manque une info, demande-la.
+6. « Je peux me permettre X ? » → réponds d'abord oui / non / oui mais, puis pourquoi en 1-2 phrases (reste du budget concerné, marge du mois).
+7. S'il exprime du stress, de la fatigue ou un coup dur : une phrase sincère d'abord, puis l'aide concrète. Jamais de morale ni de culpabilisation.
+8. Félicite brièvement ce qui va bien.
+9. Réponses courtes : 2 à 5 phrases, sauf si on te demande plus. Une seule question à la fois.
 
-RÉALISME — QUAND CRITIQUER, QUAND NE PAS LE FAIRE
-- Une dépense qui rentre dans son budget est une dépense VALIDÉE. Ne la remets pas en cause et ne suggère pas de la réduire « par principe » : un budget est fait pour être dépensé.
-- Ne critique JAMAIS : les dépenses essentielles (logement, courses, santé, énergie, transports, assurances, impôts, enfants…), les catégories "essential": true, tout ce qui figure dans profile.neverCut, ni les petits plaisirs qui restent dans leur budget.
-- Une catégorie essentielle à 100 % en début de mois (loyer, prélèvements) est NORMALE.
-- Ne signale un problème QUE s'il est réel : budget non essentiel "DÉPASSÉ", "RYTHME_RAPIDE" ou "PROCHE_LIMITE" ; objectif en retard ; marge du mois négative ; dépense vraiment inhabituelle. Un pic isolé n'est pas grave si le cumul annuel reste sain.
-- Pour économiser, vise les leviers qui comptent vraiment (gros postes non essentiels, abonnements, dérives répétées), chiffrés et faisables, sans toucher à neverCut. Une économie de quelques euros ne vaut pas une remarque.
-- Félicite sincèrement (et brièvement) ce qui va bien : budget tenu, objectif en avance, bonne épargne.
+# Exemples de ton
+Utilisateur : Je peux me faire un resto à 30 € ce soir ?
+Toi : Oui, vas-y ! Il te reste 90 € dans ton budget Restos, ça passe tranquille. Bon appétit 🍽️
 
-CHIFFRES
-- Tous les chiffres sont dans le contexte, déjà calculés. Ne les invente pas et ne refais pas de calculs compliqués : cite-les. Si une info manque, dis-le et demande.
-- Question « je peux me permettre X ? » : regarde currentMonth.margin (marge restante une fois les charges fixes à venir payées), le "remaining" du budget concerné et les objectifs. Réponds d'abord oui / non / oui mais…, puis explique en 1 ou 2 phrases.
-- Le profil (priorités, projets, confort, notes) te sert à personnaliser : utilise-le sans le réciter.
+Utilisateur : J'ai acheté des chaussures à 120 €, j'ai abusé ?
+Toi : Un peu, oui : ton budget Shopping est maintenant dépassé de 40 €. Rien de dramatique, ta marge du mois l'encaisse. Pour compenser, lève le pied sur le shopping d'ici la fin du mois et ce sera réglé.
 
-FORME
-- Conversation naturelle : réponses courtes par défaut (2 à 5 phrases), plus longues seulement si on te le demande ou pour un bilan. Markdown léger, pas de pavés ni de listes systématiques. Une seule question à la fois si tu as besoin d'une précision.`;
+Utilisateur : Mois horrible, je suis à sec…
+Toi : Courage, ces mois-là sont durs. On regarde ensemble : après tes charges fixes, il te reste 120 € jusqu'à la fin du mois. On les garde pour les courses et l'essentiel, et on met le budget loisirs en pause quelques jours. Ça te va ?`;
+
+/** Rappel placé juste avant la question : les petits modèles suivent mieux ce qui est récent. */
+export const REMINDER = `(Rappel : appuie-toi sur la fiche. Ne critique pas une dépense qui respecte son budget. Réponse courte et naturelle.)`;
 
 // ---------------------------------------------------------------------------
 // Contexte complet
@@ -80,7 +82,7 @@ function monthlyEquivalent(amount: number, freq: string, interval: number): numb
  * client Supabase passé, créé avec son JWT). Tout est calculé ici, l'IA ne fait
  * que lire. Ne lève jamais : une table absente donne simplement une section vide.
  */
-export async function loadFullContext(supabase: any): Promise<Record<string, unknown>> {
+export async function loadFullContext(supabase: any): Promise<any> {
   const now = new Date();
   const y = now.getUTCFullYear(), m = now.getUTCMonth();
   const monthStart = new Date(Date.UTC(y, m, 1));
@@ -116,6 +118,7 @@ export async function loadFullContext(supabase: any): Promise<Record<string, unk
   const curKey = isoDay(monthStart).slice(0, 7);
   let income12 = 0;
   let curIncome = 0, curExpenses = 0;
+  const netByMonth: Record<string, number> = {}; // revenus − dépenses par mois
   const perCatMonth: Record<string, Record<string, number>> = {};
   const curPerCat: Record<string, number> = {};
   const ytdPerCat: Record<string, number> = {};
@@ -126,10 +129,12 @@ export async function loadFullContext(supabase: any): Promise<Record<string, unk
     const d = new Date(t.date);
     if (t.transaction_type === "INCOME") {
       income12 += amt;
+      netByMonth[mk] = (netByMonth[mk] ?? 0) + amt;
       if (mk === curKey) curIncome += amt;
       continue;
     }
     if (t.transaction_type !== "EXPENSE") continue;
+    netByMonth[mk] = (netByMonth[mk] ?? 0) - amt;
     const cat = t.category?.name ?? "Sans catégorie";
     (perCatMonth[cat] ??= {})[mk] = (perCatMonth[cat][mk] ?? 0) + amt;
     if (mk === curKey) { curExpenses += amt; curPerCat[cat] = (curPerCat[cat] ?? 0) + amt; }
@@ -227,23 +232,30 @@ export async function loadFullContext(supabase: any): Promise<Record<string, unk
   const expectedIncome = Math.max(curIncome + incomeRestOfMonth, statedIncome);
   const margin = round2(expectedIncome - curExpenses - dueRestOfMonth);
 
-  // ---- Objectifs ----
+  // ---- Objectifs (même logique que AnalysisRepository.objectiveProgress) ----
+  // Rythme d'épargne = moyenne (revenus − dépenses) sur le mois en cours + les 2 précédents.
+  let net3 = 0;
+  for (let i = 0; i < 3; i++) {
+    const dt = new Date(Date.UTC(y, m - i, 1));
+    net3 += netByMonth[isoDay(dt).slice(0, 7)] ?? 0;
+  }
+  const savingsPace = round2(net3 / 3);
   const objectiveList = ((objectives ?? []) as any[]).map((o) => {
     const target = Number(o.target_amount) || 0;
-    let monthsLeft: number | null = null;
+    let monthsLeft = 12;
     if (o.target_date) {
       const td = new Date(String(o.target_date) + "T00:00:00Z");
       monthsLeft = Math.max(1, (td.getUTCFullYear() - y) * 12 + (td.getUTCMonth() - m));
     }
-    return {
-      title: o.title,
-      type: o.type,
-      targetAmount: round2(target),
-      targetDate: o.target_date ?? null,
-      category: o.category?.name ?? null,
-      // Pour un objectif d'épargne : effort mensuel nécessaire d'ici l'échéance
-      monthlySavingsNeeded: o.type === "SAVINGS" && monthsLeft ? round2(target / monthsLeft) : null,
-    };
+    const cat = o.category?.name ?? null;
+    if (o.type === "SAVINGS") {
+      const needed = round2(target / monthsLeft);
+      return { title: o.title, type: o.type, targetAmount: round2(target), targetDate: o.target_date ?? null,
+        monthlyNeeded: needed, currentPace: savingsPace, onTrack: savingsPace >= needed };
+    }
+    const spent = cat ? (curPerCat[cat] ?? 0) : curExpenses;
+    return { title: o.title, type: o.type, targetAmount: round2(target), category: cat,
+      spentThisMonth: round2(spent), onTrack: spent <= target };
   });
 
   // ---- Dernières opérations (30 jours, 30 max) ----
@@ -266,6 +278,7 @@ export async function loadFullContext(supabase: any): Promise<Record<string, unk
     daysInMonth,
     profile,
     accounts: ((accounts ?? []) as any[]).map((a) => ({ name: a.name, type: a.account_type, balance: round2(Number(a.balance) || 0) })),
+    savingsPace,
     currentMonth: {
       income: round2(curIncome),
       expenses: round2(curExpenses),
@@ -284,6 +297,121 @@ export async function loadFullContext(supabase: any): Promise<Record<string, unk
     spendingByCategory: spendingHistory,
     recentTransactions,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Fiche en français pour le modèle
+// ---------------------------------------------------------------------------
+
+const eur = (n: number) => `${Math.round(n).toLocaleString("fr-FR")} €`;
+const PERIODE: Record<string, string> = { MONTHLY: "mois", YEARLY: "an", WEEKLY: "semaine", CUSTOM: "période" };
+
+/** Les problèmes réels, calculés de façon déterministe (le modèle n'a pas à les chercher). */
+function alertsOf(c: any): string[] {
+  const out: string[] = [];
+  for (const b of c.budgets) {
+    const p = PERIODE[b.period] ?? "mois";
+    if (b.status === "DÉPASSÉ") out.push(`Budget ${b.category} dépassé de ${eur(-b.remaining)} (${eur(b.spent)} sur ${eur(b.limit)} par ${p}).`);
+    else if (b.status === "PROCHE_LIMITE") out.push(`Budget ${b.category} presque épuisé : ${b.pct} % utilisé, reste ${eur(b.remaining)}.`);
+    else if (b.status === "RYTHME_RAPIDE") out.push(`Budget ${b.category} part vite : ${b.pct} % utilisé au jour ${c.dayOfMonth} sur ${c.daysInMonth}.`);
+  }
+  if (c.currentMonth.margin < 0) out.push(`Mois dans le rouge : marge de ${eur(c.currentMonth.margin)} une fois les charges fixes à venir payées.`);
+  for (const o of c.objectives) {
+    if (o.onTrack) continue;
+    if (o.type === "SAVINGS") out.push(`Objectif « ${o.title} » en retard : il faut épargner ${eur(o.monthlyNeeded)}/mois, rythme actuel ${eur(o.currentPace)}/mois.`);
+    else out.push(`Plafond « ${o.title} » dépassé : ${eur(o.spentThisMonth)} dépensés pour ${eur(o.targetAmount)} max.`);
+  }
+  for (const h of c.spendingByCategory) {
+    if (h.unusualThisMonth && !h.essential) out.push(`Dépense inhabituelle en ${h.category} : ${eur(h.thisMonth)} ce mois, ~${eur(h.monthlyAverage)} d'habitude.`);
+  }
+  return out;
+}
+
+/**
+ * Transforme le contexte complet en une fiche courte, en français, problèmes en tête.
+ * Bien plus digeste pour un petit modèle qu'un gros JSON brut.
+ * [withRecent] : ajoute les dernières opérations (seulement quand la question en parle).
+ */
+export function buildBriefing(c: any, withRecent = false): string {
+  const L: string[] = [];
+  const alerts = alertsOf(c);
+  L.push(`# Fiche budget — ${c.today} (jour ${c.dayOfMonth}/${c.daysInMonth} de ${c.month})`);
+
+  L.push("", "## À signaler");
+  if (alerts.length) alerts.forEach((a) => L.push(`- ${a}`));
+  else L.push("- Rien à signaler : tout est dans les clous.");
+
+  const good = c.budgets.filter((b: any) => b.status === "OK" && !b.essential).map((b: any) => b.category);
+  const goodObj = c.objectives.filter((o: any) => o.onTrack).map((o: any) => o.title);
+  if (good.length || goodObj.length) {
+    L.push("", "## Ce qui va bien");
+    if (good.length) L.push(`- Budgets tenus : ${good.join(", ")}.`);
+    if (goodObj.length) L.push(`- Objectifs dans les temps : ${goodObj.join(", ")}.`);
+  }
+
+  const p = c.profile;
+  if (p) {
+    L.push("", "## Profil");
+    if (p.monthlyIncomeDeclared) L.push(`- Revenu mensuel déclaré : ${eur(p.monthlyIncomeDeclared)}`);
+    if (p.priorities) L.push(`- Priorités : ${p.priorities}`);
+    if (p.neverCut) L.push(`- À ne jamais couper : ${p.neverCut}`);
+    if (p.projects) L.push(`- Projets : ${p.projects}`);
+    if (p.comfort) L.push(`- Train de vie souhaité : ${p.comfort}`);
+    if (p.notes) L.push(`- Notes : ${p.notes}`);
+  }
+
+  const cm = c.currentMonth;
+  L.push("", "## Ce mois-ci");
+  L.push(`- Revenus reçus : ${eur(cm.income)}${cm.incomeStillExpected > 0 ? ` (+${eur(cm.incomeStillExpected)} attendus)` : ""}`);
+  L.push(`- Dépenses faites : ${eur(cm.expenses)}`);
+  L.push(`- Charges fixes encore à prélever : ${eur(cm.fixedChargesStillDue)}`);
+  L.push(`- Marge du mois (ce qui reste vraiment) : ${eur(cm.margin)}`);
+  L.push(`- Épargne moyenne des 3 derniers mois : ${eur(c.savingsPace)}/mois`);
+
+  if (c.budgets.length) {
+    L.push("", "## Budgets");
+    for (const b of c.budgets) {
+      L.push(`- ${b.category}${b.essential ? " (essentiel)" : ""} : ${eur(b.spent)} / ${eur(b.limit)} par ${PERIODE[b.period] ?? "mois"}, reste ${eur(b.remaining)}`);
+    }
+  }
+
+  if (c.objectives.length) {
+    L.push("", "## Objectifs");
+    for (const o of c.objectives) {
+      if (o.type === "SAVINGS") L.push(`- ${o.title} : épargner ${eur(o.targetAmount)}${o.targetDate ? ` d'ici le ${o.targetDate}` : ""} → ${eur(o.monthlyNeeded)}/mois nécessaires`);
+      else L.push(`- ${o.title} : ne pas dépasser ${eur(o.targetAmount)}/mois${o.category ? ` en ${o.category}` : ""} (${eur(o.spentThisMonth)} ce mois)`);
+    }
+  }
+
+  if (c.accounts.length) {
+    L.push("", "## Comptes");
+    L.push(c.accounts.map((a: any) => `${a.name} ${eur(a.balance)}`).join(" · "));
+  }
+
+  const fixed = c.fixedCharges.items.filter((r: any) => r.type === "EXPENSE");
+  if (fixed.length) {
+    L.push("", `## Charges fixes (~${eur(c.fixedCharges.monthlyTotal)}/mois)`);
+    fixed.sort((a: any, b: any) => b.monthlyEquivalent - a.monthlyEquivalent).slice(0, 10)
+      .forEach((r: any) => L.push(`- ${r.title} : ${eur(r.monthlyEquivalent)}/mois (prochaine le ${r.nextDue})`));
+  }
+
+  const habits = c.spendingByCategory.filter((h: any) => h.monthlyAverage >= 5).slice(0, 10);
+  if (habits.length) {
+    L.push("", `## Habitudes de dépense (moyenne sur ${c.history.monthsCovered} mois)`);
+    habits.forEach((h: any) => L.push(`- ${h.category}${h.essential ? " (essentiel)" : ""} : ~${eur(h.monthlyAverage)}/mois, ${eur(h.thisMonth)} ce mois`));
+  }
+
+  if (withRecent && c.recentTransactions.length) {
+    L.push("", "## Dernières opérations");
+    c.recentTransactions.slice(0, 15).forEach((t: any) =>
+      L.push(`- ${t.date} ${t.title} : ${t.type === "INCOME" ? "+" : "-"}${eur(t.amount)}${t.category ? ` (${t.category})` : ""}`));
+  }
+  return L.join("\n");
+}
+
+/** La question parle-t-elle d'opérations précises ? (sinon on n'envoie pas la liste) */
+export function mentionsTransactions(q: string): boolean {
+  return /(dépens|achat|achet|opération|transaction|dernier|hier|semaine|payé|pourquoi|où (est|sont|part)|passé)/i.test(q);
 }
 
 // ---------------------------------------------------------------------------

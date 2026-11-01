@@ -8,6 +8,7 @@ Web app légère pour **saisir des transactions depuis le téléphone** (iOS + A
 |---|---|
 | `index.html` | UI (connexion + saisie rapide + dernières transactions) |
 | `app.js` | Logique : auth Supabase, chargement comptes/catégories, `rpc create_transaction`, liste |
+| Bulle de chat (`#chat-fab`) | **Copilote IA** : discute avec l'Edge Function `analyst` (contexte complet rechargé côté serveur). La clé Gemini est saisie une fois et reste sur le téléphone (`localStorage`) |
 | `config.js` | URL + anon key Supabase (**non versionné** ; voir `config.example.js`) |
 | `manifest.webmanifest` + `icon.svg` + `sw.js` | Installable + chargement hors-ligne de la coquille |
 
