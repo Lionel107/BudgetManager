@@ -26,6 +26,7 @@ import com.budgetmanager.presentation.components.UndoSnackbarOverlay
 import com.budgetmanager.presentation.components.NotificationBell
 import com.budgetmanager.presentation.components.NotificationDialog
 import com.budgetmanager.presentation.components.UniversalSearchDialog
+import com.budgetmanager.presentation.components.UpdateBanner
 import com.budgetmanager.presentation.screens.home.HomeScreen
 import com.budgetmanager.presentation.screens.accounts.AccountsScreen
 import com.budgetmanager.presentation.screens.transactions.TransactionListScreen
@@ -94,34 +95,37 @@ fun AppLayout(navigationState: NavigationState) {
                 onNotificationsClick = { showNotifications = true }
             )
 
-            Box(
+            Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(start = 28.dp, end = 28.dp, top = 16.dp, bottom = 16.dp)
             ) {
-                when (navigationState.currentScreen) {
-                    Screen.HOME -> HomeScreen(navigationState)
-                    Screen.ACCOUNTS -> AccountsScreen(navigationState)
-                    Screen.TRANSACTIONS -> TransactionListScreen(navigationState)
-                    Screen.ADD_TRANSACTION -> AddTransactionScreen(navigationState)
-                    Screen.BUDGETS -> BudgetScreen(navigationState)
-                    Screen.ANALYTICS -> AnalyticsScreen(navigationState)
-                    Screen.RECURRING -> RecurringScreen(navigationState)
-                    Screen.ADD_RECURRING -> AddRecurringScreen(navigationState)
-                    Screen.TRANSFER -> TransferScreen(navigationState)
-                    Screen.CATEGORIES -> CategoryScreen(navigationState)
-                    Screen.EXPORT -> ExportScreen(navigationState)
-                    Screen.IMPORT -> ImportScreen(navigationState)
-                    Screen.TEMPLATES -> TemplateScreen(navigationState)
-                    Screen.CHALLENGES -> ChallengesScreen(navigationState)
-                    Screen.BADGES -> BadgesScreen(navigationState)
-                    Screen.EXCHANGE_RATES -> ExchangeRatesScreen(navigationState)
-                    Screen.ADVISOR -> AdvisorScreen()
-                    Screen.ANALYST -> AnalystScreen()
-                    Screen.ASSISTANT -> AssistantScreen()
-                    Screen.OBJECTIVES -> ObjectivesScreen()
-                    Screen.REGULARIZATION -> RegularizationScreen()
-                    Screen.SETTINGS -> SettingsScreen(navigationState)
+                UpdateBanner()
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    when (navigationState.currentScreen) {
+                        Screen.HOME -> HomeScreen(navigationState)
+                        Screen.ACCOUNTS -> AccountsScreen(navigationState)
+                        Screen.TRANSACTIONS -> TransactionListScreen(navigationState)
+                        Screen.ADD_TRANSACTION -> AddTransactionScreen(navigationState)
+                        Screen.BUDGETS -> BudgetScreen(navigationState)
+                        Screen.ANALYTICS -> AnalyticsScreen(navigationState)
+                        Screen.RECURRING -> RecurringScreen(navigationState)
+                        Screen.ADD_RECURRING -> AddRecurringScreen(navigationState)
+                        Screen.TRANSFER -> TransferScreen(navigationState)
+                        Screen.CATEGORIES -> CategoryScreen(navigationState)
+                        Screen.EXPORT -> ExportScreen(navigationState)
+                        Screen.IMPORT -> ImportScreen(navigationState)
+                        Screen.TEMPLATES -> TemplateScreen(navigationState)
+                        Screen.CHALLENGES -> ChallengesScreen(navigationState)
+                        Screen.BADGES -> BadgesScreen(navigationState)
+                        Screen.EXCHANGE_RATES -> ExchangeRatesScreen(navigationState)
+                        Screen.ADVISOR -> AdvisorScreen()
+                        Screen.ANALYST -> AnalystScreen()
+                        Screen.ASSISTANT -> AssistantScreen()
+                        Screen.OBJECTIVES -> ObjectivesScreen()
+                        Screen.REGULARIZATION -> RegularizationScreen()
+                        Screen.SETTINGS -> SettingsScreen(navigationState)
+                    }
                 }
             }
         }

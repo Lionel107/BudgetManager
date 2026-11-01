@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "com.budgetmanager"
-version = "2.2.0"
+version = "2.3.0"
 
 repositories {
     google()
@@ -58,13 +58,15 @@ compose.desktop {
             "-Dfile.encoding=UTF-8",
             // Rendu OpenGL au lieu de Direct3D : évite les crashs Skiko
             // "Failed Direct3D call 0x887a0005" (DXGI device removed) sur Windows.
-            "-Dskiko.renderApi=OPENGL"
+            "-Dskiko.renderApi=OPENGL",
+            // Version courante, lue par UpdateService pour proposer les mises à jour
+            "-Dbudgetmanager.version=${project.version}"
         )
 
         nativeDistributions {
             targetFormats(TargetFormat.Exe, TargetFormat.Msi)
             packageName = "BudgetManager"
-            packageVersion = "2.2.0"
+            packageVersion = "2.3.0"
             description = "Application de gestion budgetaire"
             vendor = "BudgetManager"
 
